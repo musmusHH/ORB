@@ -1398,11 +1398,53 @@ bool HTP_NewsLine(int i,string &txt,color &clr)
       {
          string imp=(g_news[bi].impact==3?"HIGH":"MED");
          clr=(g_news[bi].impact==3?C'255,96,120':C'255,139,34');
-         txt="●  "+g_news[bi].currency+"  "+TimeToString(g_news[bi].time,TIME_MINUTES)+"  "+imp+" IMPACT";
+         txt=">  "+g_news[bi].currency+"  "+TimeToString(g_news[bi].time,TIME_MINUTES)+"  "+imp+" IMPACT";
          return true;
       }
    }
    return false;
+}
+
+// Compact period stat card: PROFIT / GAIN% / WINRATE / DD / PF in 3 lines.
+void AuroraPeriodCard(string id,string title,int x,int y,int w,int h)
+{
+   datetime now=TimeCurrent(), from=0;
+   MqlDateTime dt; TimeToStruct(now,dt);
+   datetime dayStart=now-(now%86400);
+   if(title=="DAILY") from=dayStart;
+   else if(title=="WEEKLY"){ int dow=dt.day_of_week; if(dow==0) dow=7; from=dayStart-(dow-1)*86400; }        // Monday
+   else if(title=="MONTHLY"){ MqlDateTime m=dt; m.day=1; m.hour=0; m.min=0; m.sec=0; from=StructToTime(m); } // 1st of month
+   double net,gain,wr,dd,pf; HTP_PeriodStats(from,net,gain,wr,dd,pf);
+   color acc=(net>=0?C'104,244,157':C'255,96,120');
+   AuroraRect(id+"BG",x,y,w,h,C'18,34,54',C'47,75,99');
+   AuroraRect(id+"Accent",x,y,3,h,acc);
+   AuroraLabel(id+"T",title,x+8,y+4,8,C'190,201,213',"Arial Bold");
+   AuroraLabel(id+"P",FormatMoney(net)+"  "+(gain>=0?"+":"")+DoubleToString(gain,2)+"%",x+8,y+16,9,acc,"Arial Bold");
+   AuroraLabel(id+"S","WR "+DoubleToString(wr,0)+"%  DD "+DoubleToString(dd,1)+"%  PF "+DoubleToString(pf,2),x+8,y+31,7,C'160,178,198',"Arial");
+}
+
+// Aggregate stats for a period starting at 'from' (0 = whole history).
+void HTP_PeriodStats(datetime from,double &netPL,double &gainPct,double &winRate,double &ddPct,double &pf)
+{
+   netPL=0; gainPct=0; winRate=0; ddPct=0; pf=0;
+   int wins=0,total=0; double gWin=0,gLoss=0,run=0,peak=0,maxDD=0;
+   for(int i=0;i<OrdersHistoryTotal();i++)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderType()>1) continue;
+      if(!(GlobalHistory||(OrderSymbol()==Symbol()&&IsOurMagic(OrderMagicNumber())))) continue;
+      datetime ct=OrderCloseTime();
+      if(from>0 && ct<from) continue;
+      double n=OrderProfit()+OrderSwap()+OrderCommission();
+      netPL+=n; total++;
+      if(n>=0){ wins++; gWin+=n; } else gLoss+=-n;
+      run+=n; if(run>peak) peak=run; if(peak-run>maxDD) maxDD=peak-run;
+   }
+   if(total==0) return;
+   winRate=100.0*wins/total;
+   pf=(gLoss>0?gWin/gLoss:(gWin>0?99.9:0));
+   double balStart=AccountBalance()-netPL;
+   if(balStart>0){ gainPct=100.0*netPL/balStart; ddPct=100.0*maxDD/balStart; }
 }
 
 // Countdown text for a session: remaining time to close while running,
@@ -1636,9 +1678,14 @@ void AuroraBuild()
    g_htp_eqX=side-18; g_htp_eqY=AR_Y(480);   // distance from RIGHT edge to panel's LEFT side
    HTP_DrawLiveEquity("EqBox",g_htp_eqX,g_htp_eqY);
    AuroraLabelR("EqCurve","Equity curve",side-24,AR_Y(480)+6,8,C'160,178,198',"Arial");
-   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(584),12,clrWhite,"Arial Bold"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
+   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(584),12,clrWhite,"Arial Bold"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1",">  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2",">  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3",">  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
    AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+16,12,clrWhite,"Arial Bold"); AuroraRefCard("Float","FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-238,chartBottom+8,115,40,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-118,chartBottom+8,105,40,C'104,244,157');
+   // Period performance cards: DAILY / WEEKLY / MONTHLY / TOTAL (profit, gain%, WR, DD, PF).
+   AuroraPeriodCard("PDay","DAILY",side+mid-238,chartBottom+54,115,42);
+   AuroraPeriodCard("PWeek","WEEKLY",side+mid-118,chartBottom+54,105,42);
+   AuroraPeriodCard("PMon","MONTHLY",side+mid-238,chartBottom+100,115,42);
+   AuroraPeriodCard("PTot","TOTAL",side+mid-118,chartBottom+100,105,42);
    // 5-DAY PERFORMANCE TABLE built from real closed-trade history.
    string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={48,44,62,56,70,64,58,48,40}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+44,8,C'190,201,213',"Arial"); xx+=widths[h]; }
    int row=0;
@@ -1686,7 +1733,7 @@ void AuroraUpdate()
    for(int nl=0;nl<3;nl++)
    {
       if(HTP_NewsLine(nl,nTxt,nClr)) AuroraText("News"+IntegerToString(nl+1),nTxt,nClr);
-      else AuroraText("News"+IntegerToString(nl+1),(nl==0?"●  No upcoming events":""),C'150,164,184');
+      else AuroraText("News"+IntegerToString(nl+1),(nl==0?">  No upcoming events":""),C'150,164,184');
    }
    string nStat="NEWS: "+g_newsStatus;
    if(!UseNewsFilter) nStat="NEWS FILTER OFF";
