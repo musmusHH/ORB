@@ -1171,7 +1171,7 @@ bool AuroraResBitmap(string id,string res,int x,int y,int w,int h,bool behind=fa
 // Clocks: real London/NY local time (DST-aware) + session arc.
 // Equity curve: built from actual closed trade history.
 //====================================================================
-int g_htp_lastClockMin=-1, g_htp_lastHist=-1;
+int g_htp_lastClockMin=-1, g_htp_lastHist=-1, g_htp_lastTrackDay=-1;
 int g_htp_clockLX=0,g_htp_clockLY=0,g_htp_clockNX=0,g_htp_clockNY=0,g_htp_eqX=0,g_htp_eqY=0;
 
 uint HTP_ARGB(color c){ return ((uint)0xFF<<24) | ((uint)(c&0xFF)<<16) | ((uint)((c>>8)&0xFF)<<8) | (uint)((c>>16)&0xFF); }
@@ -1336,6 +1336,75 @@ void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor
    HTP_CommitFrame(id,pxbuf,w,h,x,y);
 }
 
+// Per-day trading stats from CLOSED trade history (respects magic/symbol filter).
+// dayOffset: 0=today, 1=yesterday, ... Returns false if no trades that day.
+bool HTP_DayStats(int dayOffset,string &dateStr,double &lots,double &profit,double &gainPct,
+                  double &commission,double &netPL,double &winRate,double &ddPct,double &pf)
+{
+   datetime now=TimeCurrent();
+   datetime dayStart=(now-(now%86400))-dayOffset*86400;
+   datetime dayEnd=dayStart+86400;
+   MqlDateTime dd; TimeToStruct(dayStart,dd);
+   dateStr=StringFormat("%02d.%02d",dd.mon,dd.day);
+   lots=0; profit=0; commission=0; netPL=0; winRate=0; ddPct=0; pf=0; gainPct=0;
+   int wins=0,total=0; double gWin=0,gLoss=0,run=0,peak=0,maxDD=0;
+   for(int i=0;i<OrdersHistoryTotal();i++)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderType()>1) continue;
+      if(!(GlobalHistory||(OrderSymbol()==Symbol()&&IsOurMagic(OrderMagicNumber())))) continue;
+      datetime ct=OrderCloseTime();
+      if(ct<dayStart||ct>=dayEnd) continue;
+      double p=OrderProfit(), c=OrderCommission()+OrderSwap(), n=p+c;
+      lots+=OrderLots(); profit+=p; commission+=OrderCommission(); netPL+=n; total++;
+      if(n>=0){ wins++; gWin+=n; } else gLoss+=-n;
+      run+=n; if(run>peak) peak=run; if(peak-run>maxDD) maxDD=peak-run;
+   }
+   if(total==0) return false;
+   winRate=100.0*wins/total;
+   pf=(gLoss>0?gWin/gLoss:(gWin>0?99.9:0));
+   double balNow=AccountBalance();
+   double balStart=balNow; // walk back: balance before this day = now - all net since dayStart
+   for(int j=0;j<OrdersHistoryTotal();j++)
+   {
+      if(!OrderSelect(j,SELECT_BY_POS,MODE_HISTORY)) continue;
+      if(OrderType()>1) continue;
+      if(!(GlobalHistory||(OrderSymbol()==Symbol()&&IsOurMagic(OrderMagicNumber())))) continue;
+      if(OrderCloseTime()>=dayStart) balStart-=OrderProfit()+OrderSwap()+OrderCommission();
+   }
+   if(balStart>0){ gainPct=100.0*netPL/balStart; ddPct=100.0*maxDD/balStart; }
+   return true;
+}
+
+// Next upcoming news event line for the radar (i-th soonest), returns false if none.
+bool HTP_NewsLine(int i,string &txt,color &clr)
+{
+   datetime now=TimeCurrent();
+   // collect indexes of future events sorted by time (simple selection)
+   int used[16]; int usedN=0;
+   for(int k=0;k<=i;k++)
+   {
+      datetime best=0; int bi=-1;
+      for(int e=0;e<g_newsCount;e++)
+      {
+         if(g_news[e].time<now-1800) continue;
+         bool skip=false; for(int u=0;u<usedN;u++) if(used[u]==e){ skip=true; break; }
+         if(skip) continue;
+         if(best==0||g_news[e].time<best){ best=g_news[e].time; bi=e; }
+      }
+      if(bi<0) return false;
+      if(usedN<16){ used[usedN]=bi; usedN++; }
+      if(k==i)
+      {
+         string imp=(g_news[bi].impact==3?"HIGH":"MED");
+         clr=(g_news[bi].impact==3?C'255,96,120':C'255,139,34');
+         txt="●  "+g_news[bi].currency+"  "+TimeToString(g_news[bi].time,TIME_MINUTES)+"  "+imp+" IMPACT";
+         return true;
+      }
+   }
+   return false;
+}
+
 // Countdown text for a session: remaining time to close while running,
 // otherwise time until the next open.
 string HTP_SessionCountdownText(ENUM_SESSION_ID sess,bool &inSess)
@@ -1403,10 +1472,18 @@ void HTP_UpdateLiveWidgets(bool force=false)
       AuroraText("CdN",cdN,(inN?C'255,139,34':C'150,164,184'));
    }
    int histNow=OrdersHistoryTotal();
-   if(force || histNow!=g_htp_lastHist)
+   MqlDateTime dnow; TimeToStruct(TimeCurrent(),dnow);
+   bool newDay=(dnow.day!=g_htp_lastTrackDay);
+   if(force || histNow!=g_htp_lastHist || newDay)
    {
-      g_htp_lastHist=histNow;
+      g_htp_lastHist=histNow; g_htp_lastTrackDay=dnow.day;
       HTP_DrawLiveEquity("EqBox",g_htp_eqX,g_htp_eqY);
+      if(!force)
+      {
+         // Trade closed or day rolled over -> rebuild UI so the 5-day
+         // performance table refreshes with the new history.
+         AuroraDeleteAll(); AuroraBuild();
+      }
    }
 }
 void AuroraLabel(string id,string text,int x,int y,int size,color clr,string font="Arial Bold",int anchor=ANCHOR_LEFT_UPPER)
@@ -1561,19 +1638,29 @@ void AuroraBuild()
    AuroraLabelR("EqCurve","Equity curve",side-24,AR_Y(480)+6,8,C'160,178,198',"Arial");
    AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(579),15,clrWhite,"Arial"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
-   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
-   string heads[10]={"TICKET","OPEN TIME","TYPE","LOT","ITEM","PRICE","S/L","T/P","COMMISSION","FLOATING P/L"}; int widths[10]={75,92,42,35,58,62,55,55,78,95}; int xx=side+18; for(int h=0;h<10;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+75,8,C'190,201,213',"Arial"); xx+=widths[h]; }
-   int row=0; for(int oi=0;oi<OrdersTotal() && row<5;oi++)
+   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
+   // 5-DAY PERFORMANCE TABLE built from real closed-trade history.
+   string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={62,52,76,64,86,80,68,58,50}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+75,8,C'190,201,213',"Arial"); xx+=widths[h]; }
+   int row=0;
+   for(int dayOff=0; dayOff<10 && row<5; dayOff++)
    {
-      if(!OrderSelect(oi,SELECT_BY_POS,MODE_TRADES)) continue;
-      xx=side+18; int yy=chartBottom+96+row*20; string vals[10];
-      vals[0]=IntegerToString(OrderTicket()); vals[1]=TimeToString(OrderOpenTime(),TIME_DATE|TIME_MINUTES);
-      vals[2]=(OrderType()==OP_BUY?"BUY":"SELL"); vals[3]=DoubleToString(OrderLots(),2); vals[4]=Symbol();
-      vals[5]=DoubleToString(OrderOpenPrice(),2); vals[6]=DoubleToString(OrderStopLoss(),2); vals[7]=DoubleToString(OrderTakeProfit(),2);
-      vals[8]=FormatMoney(OrderCommission()); vals[9]=FormatMoney(OrderProfit()+OrderSwap()+OrderCommission());
-      for(int q=0;q<10;q++){ AuroraLabel("Row"+IntegerToString(row)+"_"+IntegerToString(q),vals[q],xx,yy,8,(OrderProfit()>=0?C'104,244,157':C'255,96,120'),"Arial"); xx+=widths[q]; }
+      string dStr; double dLots,dProf,dGain,dComm,dNet,dWR,dDD,dPF;
+      if(!HTP_DayStats(dayOff,dStr,dLots,dProf,dGain,dComm,dNet,dWR,dDD,dPF)) continue;
+      xx=side+18; int yy=chartBottom+96+row*20; string vals[9];
+      vals[0]=dStr;
+      vals[1]=DoubleToString(dLots,2);
+      vals[2]=FormatMoney(dProf);
+      vals[3]=(dGain>=0?"+":"")+DoubleToString(dGain,2)+"%";
+      vals[4]=FormatMoney(dComm);
+      vals[5]=FormatMoney(dNet);
+      vals[6]=DoubleToString(dWR,1)+"%";
+      vals[7]=DoubleToString(dDD,1)+"%";
+      vals[8]=DoubleToString(dPF,2);
+      color rowClr=(dNet>=0?C'104,244,157':C'255,96,120');
+      for(int q=0;q<9;q++){ AuroraLabel("Row"+IntegerToString(row)+"_"+IntegerToString(q),vals[q],xx,yy,8,(q==0?C'190,201,213':rowClr),"Arial"); xx+=widths[q]; }
       row++;
    }
+   if(row==0) AuroraLabel("NoTrades","NO CLOSED TRADES IN THE LAST DAYS",side+18,chartBottom+96,9,C'150,164,184',"Arial");
    AuroraLabel("TrackerStatus","WINRATE "+DoubleToString(cachedWinRate,1)+"%     DD "+DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%     CANDLE "+FormatClock((int)MathMax(0,Time[0]+PeriodSeconds()-TimeCurrent())),side+18,aurora_h-25,9,C'190,201,213');
    ChartRedraw(0);
 }
@@ -1585,7 +1672,26 @@ void AuroraUpdate()
    AuroraText("BalV",FormatMoneyAbs(AccountBalance()),clrWhite); AuroraText("EqV",FormatMoneyAbs(AccountEquity()),clrWhite); AuroraText("FMV",FormatMoneyAbs(AccountFreeMargin()),clrWhite); AuroraText("LotV",DoubleToString(CalculateLotSize(FixedSL_Points),2),clrWhite);
    AuroraText("SrvV",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),C'190,201,213'); AuroraText("ActivePLV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("DayPLV",FormatMoney(GetPeriodProfit(0)),C'104,244,157');
    AuroraText("TTradesV",IntegerToString(cachedWins+cachedLosses),clrWhite); AuroraText("WinsV",IntegerToString(cachedWins),C'104,244,157'); AuroraText("LossV",IntegerToString(cachedLosses),C'255,96,120'); AuroraText("WinV",DoubleToString(cachedWinRate,1)+"%",C'104,244,157'); AuroraText("PFV",DoubleToString(cachedPF,2),C'104,244,157');
-   AuroraText("FloatV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("GainV",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",C'104,244,157'); AuroraText("News4",g_newsStatus,C'190,201,213'); ChartRedraw(0);
+   AuroraText("FloatV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("GainV",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",C'104,244,157');
+   // STRATEGY INFO live refresh: active session + its ORB levels (was static before).
+   ENUM_SESSION_ID dispSess=AutoDST_GetDisplaySessionId(TimeCurrent(),OrbTradeMode);
+   double sHi=(dispSess==SESSION_ID_NEWYORK?nyOrbHigh:lonOrbHigh);
+   double sLo=(dispSess==SESSION_ID_NEWYORK?nyOrbLow:lonOrbLow);
+   AuroraText("StratV",(dispSess==SESSION_ID_NEWYORK?"NEW YORK ORB":"LONDON ORB"),C'58,220,221');
+   AuroraText("ORBHV",(sHi>0?DoubleToString(sHi,Digits):"WAITING"),(sHi>0?clrWhite:C'150,164,184'));
+   AuroraText("ORBLV",(sLo>0&&sLo<999999?DoubleToString(sLo,Digits):"WAITING"),(sLo>0&&sLo<999999?clrWhite:C'150,164,184'));
+   AuroraText("ORBRV",(sHi>0&&sLo>0&&sLo<999999?DoubleToString(MathAbs(sHi-sLo)/Point,0)+" pips":"WAITING"),(sHi>0&&sLo>0&&sLo<999999?C'58,220,221':C'150,164,184'));
+   // NEWS RADAR live refresh: real upcoming events (or status if none).
+   string nTxt; color nClr;
+   for(int nl=0;nl<3;nl++)
+   {
+      if(HTP_NewsLine(nl,nTxt,nClr)) AuroraText("News"+IntegerToString(nl+1),nTxt,nClr);
+      else AuroraText("News"+IntegerToString(nl+1),(nl==0?"●  No upcoming events":""),C'150,164,184');
+   }
+   string nStat="NEWS: "+g_newsStatus;
+   if(!UseNewsFilter) nStat="NEWS FILTER OFF";
+   AuroraText("News4",nStat,(g_newsStatus=="UPDATED"?C'104,244,157':C'255,139,34'));
+   ChartRedraw(0);
 }
 //====================================================================
 // LIFECYCLE
