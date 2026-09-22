@@ -1111,6 +1111,13 @@ void ApplyThemeChartColors()
 //====================================================================
 string aurora_prefix="AURORA_";
 int aurora_w=0, aurora_h=0, aurora_left_w=298, aurora_right_w=298;
+// Vertical auto-fit: the reference layout is designed for ~735px of chart
+// height. On smaller charts every section below the fixed-size bitmaps is
+// compressed proportionally so the BOTTOM OF BOTH PANELS ALWAYS STAYS VISIBLE.
+double g_aurora_vs=1.0;
+int AL_Y(int y){ if(y<=94)  return y; return 94 +(int)MathRound((y-94) *g_aurora_vs); }  // left panel (below logo)
+int AR_Y(int y){ if(y<=172) return y; return 172+(int)MathRound((y-172)*g_aurora_vs); }  // right panel (below clocks+countdown)
+int A_H(int hh){ return MathMax(36,(int)MathRound(hh*g_aurora_vs)); }                     // card heights
 
 void AuroraDeleteAll()
 {
@@ -1205,16 +1212,19 @@ void HTP_SetBitmapObj(string id,string res,int x,int y,int w,int h,bool rightAnc
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
 }
 
-// Analog session clock rendered live: hands = real session local time,
-// colored arc = the session window (open -> close) on the 12h dial.
-// x = distance from the chart's RIGHT edge to the clock's RIGHT edge (right-anchored).
+// Analog session clock with NEON PROGRESS RING rendered live:
+//  - hands   = real session local time (DST-aware)
+//  - neon arc = fills with elapsed session time (12 o'clock -> close),
+//               glows, has a bright tip marker, and STOPS when the
+//               session closes (ring goes dim until the next open).
+// x = distance from the chart's RIGHT edge to the clock's LEFT side.
 void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor)
 {
    int w=112,h=112;
    uint pxbuf[]; ArrayResize(pxbuf,w*h); ArrayInitialize(pxbuf,0x00000000);
    double PI2=6.28318530717959;
    double cx=(w-1)/2.0, cy=(h-1)/2.0;
-   double rOut=55.0, ringIn=45.0, faceR=42.0;
+   double rOut=51.0, ringIn=43.0, faceR=40.0, glowMax=55.5;
 
    datetime now=TimeCurrent();
    datetime lt=AutoDST_GetSessionLocalTime(now,sess);
@@ -1223,24 +1233,30 @@ void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor
    double hh=(dt.hour%12)+mm/60.0;
    double aH=hh/12.0*PI2, aM=mm/60.0*PI2;                 // angle from 12 o'clock, clockwise
 
-   int brokerOff=AutoDST_GetBrokerGMTOffsetHours(now);
-   int sessOff  =AutoDST_GetSessionGMTOffsetHours(now,sess);
-   int openSrv  =(sess==SESSION_ID_LONDON ? g_auto_session_times.london_open_server_min  : g_auto_session_times.ny_open_server_min);
-   int closeSrv =(sess==SESSION_ID_LONDON ? g_auto_session_times.london_close_server_min : g_auto_session_times.ny_close_server_min);
-   int openLoc  =AutoDST_NormalizeMinutes(openSrv -(brokerOff-sessOff)*60);
-   int spanMin  =AutoDST_NormalizeMinutes(closeSrv-openSrv); if(spanMin>720) spanMin=720;
-   double aStart=MathMod((double)openLoc,720.0)/720.0*PI2;
-   double aSpan =spanMin/720.0*PI2;
+   // Session progress: ring fills while the session runs, stops at close.
+   int oMin=0,eMin=0,cMin=0; AutoDST_GetSessionServerSchedule(now,sess,oMin,eMin,cMin);
+   MqlDateTime sv; TimeToStruct(now,sv);
+   int nowSec=(sv.hour*60+sv.min)*60+sv.sec;
+   int oS=oMin*60, cS=cMin*60;
+   bool inSess=(cS>oS)?(nowSec>=oS&&nowSec<cS):(nowSec>=oS||nowSec<cS);
+   double prog=0.0;
+   if(inSess)
+   {
+      int span=cS-oS; if(span<0) span+=86400;
+      int el=nowSec-oS; if(el<0) el+=86400;
+      if(span>0) prog=MathMin(1.0,(double)el/(double)span);
+   }
+   double aFill=prog*PI2;
 
-   uint cArc  =HTP_ARGB(arcColor);
-   uint cRing =HTP_ARGB(C'42,50,66');
-   uint cFace =HTP_ARGB(C'246,244,243');
-   uint cDark =HTP_ARGB(C'30,40,56');
-   uint cDot  =HTP_ARGB(C'110,118,132');
+   uint neon=HTP_ARGB(arcColor); uint neonRGB=neon&0x00FFFFFF;
+   uint cRing=HTP_ARGB(C'26,36,52');
+   uint cFace=HTP_ARGB(C'246,244,243');
+   uint cDark=HTP_ARGB(C'30,40,56');
+   uint cDot =HTP_ARGB(C'110,118,132');
 
    // hand endpoints
-   double mx=cx+MathSin(aM)*33.0, my=cy-MathCos(aM)*33.0;
-   double hx=cx+MathSin(aH)*23.0, hy=cy-MathCos(aH)*23.0;
+   double mxp=cx+MathSin(aM)*31.0, myp=cy-MathCos(aM)*31.0;
+   double hxp=cx+MathSin(aH)*21.0, hyp=cy-MathCos(aH)*21.0;
 
    for(int py=0;py<h;py++)
    {
@@ -1248,33 +1264,72 @@ void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor
       {
          double dx=pxi-cx, dy=py-cy;
          double dist=MathSqrt(dx*dx+dy*dy);
-         if(dist>rOut) continue;
+         if(dist>glowMax) continue;
          int idx=py*w+pxi;
          double ang=Atan2(dx,-dy); if(ang<0) ang+=PI2;    // 0 at 12 o'clock, clockwise
-         if(dist>=ringIn)                                  // outer ring + session arc
+         bool filled=(inSess && ang<=aFill);
+         if(dist<=faceR)                                  // white clock face
          {
-            double rel=ang-aStart; if(rel<0) rel+=PI2;
-            pxbuf[idx]=(rel<=aSpan ? cArc : cRing);
+            pxbuf[idx]=cFace;
+            if(dist>faceR-6.5 && dist<faceR-2.0)          // hour ticks
+            {
+               double tickStep=PI2/12.0;
+               double nearest=MathMod(ang+tickStep/2.0,tickStep)-tickStep/2.0;
+               if(MathAbs(nearest)*dist<1.6){ pxbuf[idx]=cDark; continue; }
+            }
+            if(HTP_SegDist(pxi,py,cx,cy,mxp,myp)<=1.6){ pxbuf[idx]=cDark; continue; }
+            if(HTP_SegDist(pxi,py,cx,cy,hxp,hyp)<=2.2){ pxbuf[idx]=cDark; continue; }
+            if(dist<=3.0) pxbuf[idx]=cDot;
             continue;
          }
-         if(dist>faceR){ pxbuf[idx]=cDark; continue; }     // thin dark rim
-         pxbuf[idx]=cFace;                                 // white face
-         // hour tick marks
-         if(dist>faceR-7.0 && dist<faceR-2.0)
+         if(dist<ringIn){ pxbuf[idx]=cDark; continue; }   // rim between face and ring
+         if(dist<=rOut){ pxbuf[idx]=(filled?neon:cRing); continue; }  // ring core
+         if(filled)                                       // outer neon glow
          {
-            double tickStep=PI2/12.0;
-            double nearest=MathMod(ang+tickStep/2.0,tickStep)-tickStep/2.0;
-            if(MathAbs(nearest)*dist<1.6){ pxbuf[idx]=cDark; continue; }
+            double t=1.0-(dist-rOut)/(glowMax-rOut);
+            int a=(int)(t*t*170.0);
+            if(a>0) pxbuf[idx]=(((uint)a)<<24)|neonRGB;
          }
-         // hands
-         if(HTP_SegDist(pxi,py,cx,cy,mx,my)<=1.7){ pxbuf[idx]=cDark; continue; }
-         if(HTP_SegDist(pxi,py,cx,cy,hx,hy)<=2.3){ pxbuf[idx]=cDark; continue; }
-         if(dist<=3.2) pxbuf[idx]=cDot;                    // center dot
+      }
+   }
+   // Bright tip marker at the head of the progress arc
+   if(inSess)
+   {
+      double rM=(ringIn+rOut)/2.0;
+      int tx=(int)MathRound(cx+MathSin(aFill)*rM), ty=(int)MathRound(cy-MathCos(aFill)*rM);
+      for(int oy=-7;oy<=7;oy++)
+      {
+         for(int ox=-7;ox<=7;ox++)
+         {
+            int X=tx+ox, Y=ty+oy; if(X<0||X>=w||Y<0||Y>=h) continue;
+            double d=MathSqrt((double)(ox*ox+oy*oy)); int idx2=Y*w+X;
+            if(d<=2.6) pxbuf[idx2]=HTP_ARGB(clrWhite);
+            else if(d<=7.0 && ((pxbuf[idx2]>>24)&0xFF)<0x40)
+            {
+               int a2=(int)((1.0-(d-2.6)/4.4)*200.0);
+               if(a2>0) pxbuf[idx2]=(((uint)a2)<<24)|neonRGB;
+            }
+         }
       }
    }
    string res="::HTP_"+id;
    ResourceCreate(res,pxbuf,w,h,0,0,0,1);
    HTP_SetBitmapObj(id,res,x,y,w,h,true);
+}
+
+// Countdown text for a session: remaining time to close while running,
+// otherwise time until the next open.
+string HTP_SessionCountdownText(ENUM_SESSION_ID sess,bool &inSess)
+{
+   datetime now=TimeCurrent();
+   MqlDateTime dt; TimeToStruct(now,dt);
+   int nowSec=(dt.hour*60+dt.min)*60+dt.sec;
+   int oMin=0,eMin=0,cMin=0; AutoDST_GetSessionServerSchedule(now,sess,oMin,eMin,cMin);
+   int oS=oMin*60, cS=cMin*60;
+   inSess=(cS>oS)?(nowSec>=oS&&nowSec<cS):(nowSec>=oS||nowSec<cS);
+   if(inSess){ int rem=cS-nowSec; if(rem<0) rem+=86400; return "ENDS "+FormatClock(rem); }
+   int toStart=oS-nowSec; if(toStart<0) toStart+=86400;
+   return "STARTS "+FormatClock(toStart);
 }
 
 // Equity curve rendered live from actual closed-trade history (g_eqBalances).
@@ -1313,16 +1368,22 @@ void HTP_DrawLiveEquity(string id,int x,int y)
    HTP_SetBitmapObj(id,res,x,y,w,h,true);
 }
 
-// Refresh live widgets: clocks once per minute, equity when history changes.
+// Refresh live widgets: neon rings + countdowns every second,
+// equity when history changes.
 void HTP_UpdateLiveWidgets(bool force=false)
 {
    MqlDateTime dt; TimeToStruct(TimeCurrent(),dt);
-   int curMin=dt.hour*60+dt.min;
-   if(force || curMin!=g_htp_lastClockMin)
+   int curSec=(dt.hour*60+dt.min)*60+dt.sec;
+   if(force || curSec!=g_htp_lastClockMin)
    {
-      g_htp_lastClockMin=curMin;
+      g_htp_lastClockMin=curSec;
       HTP_DrawLiveClock("ClockL",g_htp_clockLX,g_htp_clockLY,SESSION_ID_LONDON,C'34,197,94');
       HTP_DrawLiveClock("ClockN",g_htp_clockNX,g_htp_clockNY,SESSION_ID_NEWYORK,C'255,139,34');
+      bool inL=false,inN=false;
+      string cdL=HTP_SessionCountdownText(SESSION_ID_LONDON,inL);
+      string cdN=HTP_SessionCountdownText(SESSION_ID_NEWYORK,inN);
+      AuroraText("CdL",cdL,(inL?C'34,197,94':C'150,164,184'));
+      AuroraText("CdN",cdN,(inN?C'255,139,34':C'150,164,184'));
    }
    int histNow=OrdersHistoryTotal();
    if(force || histNow!=g_htp_lastHist)
@@ -1406,6 +1467,10 @@ void AuroraBuild()
    aurora_w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0); aurora_h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
    if(aurora_w<300) aurora_w=1366; if(aurora_h<300) aurora_h=768;   // fallback only if chart not ready yet
    int side=285, mid=MathMax(300,aurora_w-2*side), chartBottom=MathMax(360,aurora_h-190);
+   // Vertical auto-fit: compress sections below the fixed bitmaps so the
+   // BOTTOM OF BOTH SIDE PANELS is always inside the visible chart.
+   g_aurora_vs=MathMin(1.0,MathMin((aurora_h-122)/605.0,(aurora_h-188)/550.0));
+   if(g_aurora_vs<0.55) g_aurora_vs=0.55;
    ChartSetInteger(0,CHART_MODE,CHART_CANDLES); ChartSetInteger(0,CHART_FOREGROUND,false);
    ChartSetInteger(0,CHART_COLOR_BACKGROUND,C'7,17,31'); ChartSetInteger(0,CHART_COLOR_GRID,C'35,58,79');
    ChartSetInteger(0,CHART_COLOR_CANDLE_BULL,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CANDLE_BEAR,C'255,139,34');
@@ -1415,31 +1480,35 @@ void AuroraBuild()
    AuroraRect("RefBottom",side,chartBottom,mid,aurora_h-chartBottom,C'10,25,42',C'34,70,93');
    // Logo card: generated bitmap asset matching the mockup (compass + HORIZON TACTICAL + target).
    AuroraResBitmap("LogoCard","logo_card.bmp",10,8,265,86);
-   AuroraRefCard("Status","EA STATUS","ACTIVE (GREEN)",10,102,265,55,C'104,244,157');
-   AuroraRefCard("Srv","DATE / SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),10,164,265,55,C'190,201,213');
-   AuroraLabel("AccTitle","ACCOUNT INFO",20,236,20,clrWhite,"Arial");
-   AuroraRefCard("Bal","BALANCE",FormatMoneyAbs(AccountBalance()),18,268,124,58,C'190,201,213'); AuroraRefCard("Eq","EQUITY",FormatMoneyAbs(AccountEquity()),151,268,124,58,C'190,201,213');
-   AuroraRefCard("FM","FREE MARGIN",FormatMoneyAbs(AccountFreeMargin()),18,334,124,58,C'190,201,213'); AuroraRefCard("Lot","LOT SIZE",DoubleToString(CalculateLotSize(FixedSL_Points),2),151,334,124,58,C'190,201,213');
-   AuroraRefCard("DD","DRAWDOWN",DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%",18,400,124,58,C'255,139,34'); AuroraRefCard("Lev","LEVERAGE","1:"+IntegerToString((int)AccountLeverage()),151,400,124,58,C'190,201,213');
-   AuroraLabel("StrTitle","STRATEGY INFO",20,482,20,clrWhite,"Arial"); AuroraRefCard("Strat","CURRENT STRATEGY",OrbTradeMode==MODE_NY_ONLY?"NEW YORK ORB":"LONDON ORB",18,515,257,52,C'58,220,221');
-   AuroraRefCard("ORBH","ORB HIGH",DoubleToString(lonOrbHigh,2),18,575,124,58,C'190,201,213'); AuroraRefCard("ORBL","ORB LOW",DoubleToString(lonOrbLow,2),151,575,124,58,C'190,201,213'); AuroraRefCard("ORBR","ORB RANGE",DoubleToString(MathAbs(lonOrbHigh-lonOrbLow)/Point,0)+" pips",18,641,124,58,C'58,220,221');
+   AuroraRefCard("Status","EA STATUS","ACTIVE (GREEN)",10,AL_Y(102),265,A_H(55),C'104,244,157');
+   AuroraRefCard("Srv","DATE / SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),10,AL_Y(164),265,A_H(55),C'190,201,213');
+   AuroraLabel("AccTitle","ACCOUNT INFO",20,AL_Y(236),20,clrWhite,"Arial");
+   AuroraRefCard("Bal","BALANCE",FormatMoneyAbs(AccountBalance()),18,AL_Y(268),124,A_H(58),C'190,201,213'); AuroraRefCard("Eq","EQUITY",FormatMoneyAbs(AccountEquity()),151,AL_Y(268),124,A_H(58),C'190,201,213');
+   AuroraRefCard("FM","FREE MARGIN",FormatMoneyAbs(AccountFreeMargin()),18,AL_Y(334),124,A_H(58),C'190,201,213'); AuroraRefCard("Lot","LOT SIZE",DoubleToString(CalculateLotSize(FixedSL_Points),2),151,AL_Y(334),124,A_H(58),C'190,201,213');
+   AuroraRefCard("DD","DRAWDOWN",DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%",18,AL_Y(400),124,A_H(58),C'255,139,34'); AuroraRefCard("Lev","LEVERAGE","1:"+IntegerToString((int)AccountLeverage()),151,AL_Y(400),124,A_H(58),C'190,201,213');
+   AuroraLabel("StrTitle","STRATEGY INFO",20,AL_Y(482),20,clrWhite,"Arial"); AuroraRefCard("Strat","CURRENT STRATEGY",OrbTradeMode==MODE_NY_ONLY?"NEW YORK ORB":"LONDON ORB",18,AL_Y(515),257,A_H(52),C'58,220,221');
+   AuroraRefCard("ORBH","ORB HIGH",DoubleToString(lonOrbHigh,2),18,AL_Y(575),124,A_H(58),C'190,201,213'); AuroraRefCard("ORBL","ORB LOW",DoubleToString(lonOrbLow,2),151,AL_Y(575),124,A_H(58),C'190,201,213'); AuroraRefCard("ORBR","ORB RANGE",DoubleToString(MathAbs(lonOrbHigh-lonOrbLow)/Point,0)+" pips",18,AL_Y(641),124,A_H(58),C'58,220,221');
    AuroraLabel("TradeRun","LONDON / NEW YORK ORB  //  RUNNING",18,aurora_h-23,9,C'58,220,221');
    // Right panel: ANCHORED TO THE RIGHT EDGE (CORNER_RIGHT_UPPER) so it always
    // stays fully visible regardless of the window / chart size.
-   AuroraLabelR("SesL","LONDON SESSION",side-16,20,11,clrWhite,"Arial"); AuroraLabelR("SesN","NEW YORK SESSION",side-144,20,11,clrWhite,"Arial");
-   // Session clocks: LIVE analog clocks (real DST-aware London/NY time, session arc = actual session window).
-   g_htp_clockLX=side-18; g_htp_clockLY=42; g_htp_clockNX=side-150; g_htp_clockNY=42;   // distance from RIGHT edge to clock's LEFT side
+   AuroraLabelR("SesL","LONDON SESSION",side-16,14,11,clrWhite,"Arial"); AuroraLabelR("SesN","NEW YORK SESSION",side-144,14,11,clrWhite,"Arial");
+   // Session clocks: LIVE analog clocks with NEON progress ring (fills with
+   // elapsed session time, stops at close) + countdown labels underneath.
+   g_htp_clockLX=side-18; g_htp_clockLY=34; g_htp_clockNX=side-150; g_htp_clockNY=34;   // distance from RIGHT edge to clock's LEFT side
    HTP_DrawLiveClock("ClockL",g_htp_clockLX,g_htp_clockLY,SESSION_ID_LONDON,C'34,197,94');
    HTP_DrawLiveClock("ClockN",g_htp_clockNX,g_htp_clockNY,SESSION_ID_NEWYORK,C'255,139,34');
-   AuroraLabelR("PerfTitle","PERFORMANCE SUMMARY",side-16,178,15,clrWhite,"Arial");
-   AuroraRefCardR("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),side-18,211,80,58,clrWhite); AuroraRefCardR("Wins","WINS",IntegerToString(cachedWins),side-103,211,80,58,C'104,244,157'); AuroraRefCardR("Loss","LOSSES",IntegerToString(cachedLosses),side-188,211,80,58,C'255,96,120');
-   AuroraRefCardR("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",side-18,277,124,58,C'104,244,157'); AuroraRefCardR("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),side-151,277,117,58,C'104,244,157');
-   AuroraLabelR("PLTitle","P/L METRICS",side-16,359,15,clrWhite,"Arial"); AuroraRefCardR("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),side-18,392,124,58,C'104,244,157'); AuroraRefCardR("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),side-151,392,117,58,C'104,244,157');
+   bool inL=false,inN=false; string cdL=HTP_SessionCountdownText(SESSION_ID_LONDON,inL), cdN=HTP_SessionCountdownText(SESSION_ID_NEWYORK,inN);
+   AuroraLabelR("CdL",cdL,side-24,150,9,(inL?C'34,197,94':C'150,164,184'),"Arial Bold");
+   AuroraLabelR("CdN",cdN,side-156,150,9,(inN?C'255,139,34':C'150,164,184'),"Arial Bold");
+   AuroraLabelR("PerfTitle","PERFORMANCE SUMMARY",side-16,AR_Y(184),15,clrWhite,"Arial");
+   AuroraRefCardR("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),side-18,AR_Y(211),80,A_H(58),clrWhite); AuroraRefCardR("Wins","WINS",IntegerToString(cachedWins),side-103,AR_Y(211),80,A_H(58),C'104,244,157'); AuroraRefCardR("Loss","LOSSES",IntegerToString(cachedLosses),side-188,AR_Y(211),80,A_H(58),C'255,96,120');
+   AuroraRefCardR("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",side-18,AR_Y(277),124,A_H(58),C'104,244,157'); AuroraRefCardR("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),side-151,AR_Y(277),117,A_H(58),C'104,244,157');
+   AuroraLabelR("PLTitle","P/L METRICS",side-16,AR_Y(359),15,clrWhite,"Arial"); AuroraRefCardR("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),side-18,AR_Y(392),124,A_H(58),C'104,244,157'); AuroraRefCardR("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),side-151,AR_Y(392),117,A_H(58),C'104,244,157');
    // Equity curve widget: LIVE curve drawn from actual closed-trade history (mockup style).
-   g_htp_eqX=side-18; g_htp_eqY=480;   // distance from RIGHT edge to panel's LEFT side
+   g_htp_eqX=side-18; g_htp_eqY=AR_Y(480);   // distance from RIGHT edge to panel's LEFT side
    HTP_DrawLiveEquity("EqBox",g_htp_eqX,g_htp_eqY);
-   AuroraLabelR("EqCurve","Equity curve",side-24,486,8,C'160,178,198',"Arial");
-   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,579,15,clrWhite,"Arial"); AuroraRectR("NewsBox",side-18,610,250,115,C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,628,9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,652,9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,676,9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,700,9,C'190,201,213');
+   AuroraLabelR("EqCurve","Equity curve",side-24,AR_Y(480)+6,8,C'160,178,198',"Arial");
+   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(579),15,clrWhite,"Arial"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
    AuroraLabel("LiveTitle","LIVE PROFIT TRACKER",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
    string heads[10]={"TICKET","OPEN TIME","TYPE","LOT","ITEM","PRICE","S/L","T/P","COMMISSION","FLOATING P/L"}; int widths[10]={75,92,42,35,58,62,55,55,78,95}; int xx=side+18; for(int h=0;h<10;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+75,8,C'190,201,213',"Arial"); xx+=widths[h]; }
