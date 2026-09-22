@@ -1539,15 +1539,12 @@ void HTP_UpdateLiveWidgets(bool force=false)
       HTP_DrawLiveEquity("EqBox",g_htp_eqX,g_htp_eqY);
       if(!force)
       {
-         // Trade closed or day rolled over -> rebuild UI so the 5-day
-         // performance table refreshes with the new history.
-         // TESTER GUARD: trades close constantly in the tester; a full
-         // teardown+rebuild on every close destroyed the panels mid-test.
-         // Rebuild at most every 5 real seconds there (values still refresh
-         // every second via AuroraUpdate/AuroraText).
-         static uint g_htp_rebuildMs=0;
-         if(!IsTesting() || nowMs-g_htp_rebuildMs>=5000)
-         { g_htp_rebuildMs=nowMs; AuroraDeleteAll(); AuroraBuild(); }
+         // Trade closed or day rolled over -> refresh the 5-day table & cards.
+         // NO teardown: AuroraDeleteAll() blanked EVERY panel (clocks, ORB
+         // boxes) for a frame -> that was the blink. AuroraBuild() is fully
+         // idempotent (every object is ObjectFind-guarded and updated in
+         // place), so we just re-run it to refresh values without deleting.
+         AuroraBuild();
       }
    }
 }
@@ -1644,9 +1641,15 @@ void AuroraBuild()
    {
       int bgW=MathMax(50,aurora_w-2*side);        // area between the panels
       int bgH=MathMax(50,chartBottom);            // down to the bottom tracker
+      // Rescaling the bitmap is EXPENSIVE (bgW*bgH pixel loop). AuroraBuild
+      // now runs on every closed trade to refresh the tables, so skip the
+      // rebuild when the background object already exists at the same size.
+      static int g_bgW=-1,g_bgH=-1;
+      bool bgNeeds=(ObjectFind(0,aurora_prefix+"ChartBG")<0 || bgW!=g_bgW || bgH!=g_bgH);
       uint src[]; int sw=0,sh=0;
-      if(ResourceReadImage("::HorizonAssets\\chart_bg.bmp",src,sw,sh) && sw>0 && sh>0)
+      if(bgNeeds && ResourceReadImage("::HorizonAssets\\chart_bg.bmp",src,sw,sh) && sw>0 && sh>0)
       {
+         g_bgW=bgW; g_bgH=bgH;
          uint dst[]; ArrayResize(dst,bgW*bgH);
          for(int yy=0;yy<bgH;yy++)
          {
@@ -1751,7 +1754,7 @@ void AuroraUpdate()
       int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
       int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
       if(cw>300 && ch>300 && (cw!=aurora_w || ch!=aurora_h))
-      { AuroraDeleteAll(); AuroraBuild(); HTP_UpdateLiveWidgets(true); return; }
+      { AuroraBuild(); HTP_UpdateLiveWidgets(true); return; }   // in-place reflow, no teardown (no blink)
    }
    HTP_UpdateLiveWidgets(); // neon rings + countdowns every second, equity curve on new closed trades
    AuroraText("BalV",FormatMoneyAbs(AccountBalance()),clrWhite); AuroraText("EqV",FormatMoneyAbs(AccountEquity()),clrWhite); AuroraText("FMV",FormatMoneyAbs(AccountFreeMargin()),clrWhite); AuroraText("LotV",DoubleToString(CalculateLotSize(FixedSL_Points),2),clrWhite);
