@@ -13,6 +13,7 @@
 // Generated to match the HORIZON TACTICAL mockup exactly.
 //===============================================================
 #resource "HorizonAssets\\logo_card.bmp"
+#resource "HorizonAssets\\chart_bg.bmp"     // cyber-grid chart background (drawn behind candles)
 // Clocks and equity curve are now rendered LIVE at runtime (ResourceCreate)
 // from real session times and actual trade history - see HTP_* functions.
 //===============================================================
@@ -787,6 +788,7 @@ input string News_Currency = "USD,EUR";
 
 input string Inp_UI = "=== GLASSMORPHISM UI ===";
 input bool   UseCreativeAuroraUI = true;
+input bool   UseChartBG = true;             // Show cyber-grid image behind the candles
 input string AuroraAssetFolder = "HorizonTactical_Navy_Assets\\MT4_BMP";
 input bool   ShowModernPanel = true;
 input int    UI_PosX = 0;
@@ -1491,6 +1493,18 @@ void AuroraBuild()
    ChartSetInteger(0,CHART_COLOR_CANDLE_BULL,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CANDLE_BEAR,C'255,139,34');
    ChartSetInteger(0,CHART_COLOR_CHART_UP,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CHART_DOWN,C'255,139,34');
    ChartSetInteger(0,CHART_SHOW_PRICE_SCALE,true); ChartSetInteger(0,CHART_SHOW_DATE_SCALE,true);
+   // Cyber-grid background image behind the candles (BACK=true -> price action draws on top).
+   if(UseChartBG)
+   {
+      string bgn=aurora_prefix+"ChartBG";
+      if(ObjectFind(0,bgn)<0) ObjectCreate(0,bgn,OBJ_BITMAP_LABEL,0,0,0);
+      ObjectSetInteger(0,bgn,OBJPROP_XDISTANCE,0); ObjectSetInteger(0,bgn,OBJPROP_YDISTANCE,0);
+      ObjectSetInteger(0,bgn,OBJPROP_XSIZE,aurora_w); ObjectSetInteger(0,bgn,OBJPROP_YSIZE,aurora_h);
+      ObjectSetString(0,bgn,OBJPROP_BMPFILE,"::HorizonAssets\\chart_bg.bmp");
+      ObjectSetInteger(0,bgn,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+      ObjectSetInteger(0,bgn,OBJPROP_BACK,true);                    // behind candles & grid
+      ObjectSetInteger(0,bgn,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,bgn,OBJPROP_HIDDEN,true);
+   }
    AuroraRect("RefLeft",0,0,side,aurora_h,C'9,20,35',C'33,73,101'); AuroraRectR("RefRight",side,0,side,aurora_h,C'9,20,35',C'33,73,101');
    AuroraRect("RefBottom",side,chartBottom,mid,aurora_h-chartBottom,C'10,25,42',C'34,70,93');
    // Logo card: generated bitmap asset matching the mockup (compass + HORIZON TACTICAL + target).
