@@ -1494,16 +1494,38 @@ void AuroraBuild()
    ChartSetInteger(0,CHART_COLOR_CHART_UP,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CHART_DOWN,C'255,139,34');
    ChartSetInteger(0,CHART_SHOW_PRICE_SCALE,true); ChartSetInteger(0,CHART_SHOW_DATE_SCALE,true);
    // Cyber-grid background image behind the candles (BACK=true -> price action draws on top).
+   // MT4 CROPS bitmaps (never scales), so the embedded image is rescaled at
+   // runtime with ResourceReadImage into a resource that EXACTLY fits the
+   // area between the two side panels - the full picture (including the grid
+   // floor at the bottom) is always visible, like the reference layout.
    if(UseChartBG)
    {
-      string bgn=aurora_prefix+"ChartBG";
-      if(ObjectFind(0,bgn)<0) ObjectCreate(0,bgn,OBJ_BITMAP_LABEL,0,0,0);
-      ObjectSetInteger(0,bgn,OBJPROP_XDISTANCE,0); ObjectSetInteger(0,bgn,OBJPROP_YDISTANCE,0);
-      ObjectSetInteger(0,bgn,OBJPROP_XSIZE,aurora_w); ObjectSetInteger(0,bgn,OBJPROP_YSIZE,aurora_h);
-      ObjectSetString(0,bgn,OBJPROP_BMPFILE,"::HorizonAssets\\chart_bg.bmp");
-      ObjectSetInteger(0,bgn,OBJPROP_CORNER,CORNER_LEFT_UPPER);
-      ObjectSetInteger(0,bgn,OBJPROP_BACK,true);                    // behind candles & grid
-      ObjectSetInteger(0,bgn,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,bgn,OBJPROP_HIDDEN,true);
+      int bgW=MathMax(50,aurora_w-2*side);        // area between the panels
+      int bgH=MathMax(50,chartBottom);            // down to the bottom tracker
+      uint src[]; int sw=0,sh=0;
+      if(ResourceReadImage("::HorizonAssets\\chart_bg.bmp",src,sw,sh) && sw>0 && sh>0)
+      {
+         uint dst[]; ArrayResize(dst,bgW*bgH);
+         for(int yy=0;yy<bgH;yy++)
+         {
+            int sy=(int)((double)yy*sh/bgH); if(sy>=sh) sy=sh-1;
+            int rowS=sy*sw, rowD=yy*bgW;
+            for(int xx=0;xx<bgW;xx++)
+            {
+               int sx=(int)((double)xx*sw/bgW); if(sx>=sw) sx=sw-1;
+               dst[rowD+xx]=src[rowS+sx]|0xFF000000;   // force opaque
+            }
+         }
+         ResourceCreate("::HTP_ChartBG",dst,bgW,bgH,0,0,0,1);
+         string bgn=aurora_prefix+"ChartBG";
+         if(ObjectFind(0,bgn)<0) ObjectCreate(0,bgn,OBJ_BITMAP_LABEL,0,0,0);
+         ObjectSetInteger(0,bgn,OBJPROP_XDISTANCE,side); ObjectSetInteger(0,bgn,OBJPROP_YDISTANCE,0);
+         ObjectSetInteger(0,bgn,OBJPROP_XSIZE,bgW); ObjectSetInteger(0,bgn,OBJPROP_YSIZE,bgH);
+         ObjectSetString(0,bgn,OBJPROP_BMPFILE,"::HTP_ChartBG");
+         ObjectSetInteger(0,bgn,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+         ObjectSetInteger(0,bgn,OBJPROP_BACK,true);                 // behind candles & grid
+         ObjectSetInteger(0,bgn,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,bgn,OBJPROP_HIDDEN,true);
+      }
    }
    AuroraRect("RefLeft",0,0,side,aurora_h,C'9,20,35',C'33,73,101'); AuroraRectR("RefRight",side,0,side,aurora_h,C'9,20,35',C'33,73,101');
    AuroraRect("RefBottom",side,chartBottom,mid,aurora_h-chartBottom,C'10,25,42',C'34,70,93');
