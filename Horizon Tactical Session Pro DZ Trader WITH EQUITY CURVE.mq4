@@ -1638,15 +1638,15 @@ void AuroraBuild()
    AuroraLabelR("EqCurve","Equity curve",side-24,AR_Y(480)+6,8,C'160,178,198',"Arial");
    AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(579),15,clrWhite,"Arial"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
-   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
+   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+16,12,clrWhite,"Arial Bold"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
    // 5-DAY PERFORMANCE TABLE built from real closed-trade history.
-   string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={62,52,76,64,86,80,68,58,50}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+75,8,C'190,201,213',"Arial"); xx+=widths[h]; }
+   string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={62,52,76,64,86,80,68,58,50}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+44,8,C'190,201,213',"Arial"); xx+=widths[h]; }
    int row=0;
    for(int dayOff=0; dayOff<10 && row<5; dayOff++)
    {
       string dStr; double dLots,dProf,dGain,dComm,dNet,dWR,dDD,dPF;
       if(!HTP_DayStats(dayOff,dStr,dLots,dProf,dGain,dComm,dNet,dWR,dDD,dPF)) continue;
-      xx=side+18; int yy=chartBottom+96+row*20; string vals[9];
+      xx=side+18; int yy=chartBottom+62+row*19; string vals[9];
       vals[0]=dStr;
       vals[1]=DoubleToString(dLots,2);
       vals[2]=FormatMoney(dProf);
@@ -1660,7 +1660,7 @@ void AuroraBuild()
       for(int q=0;q<9;q++){ AuroraLabel("Row"+IntegerToString(row)+"_"+IntegerToString(q),vals[q],xx,yy,8,(q==0?C'190,201,213':rowClr),"Arial"); xx+=widths[q]; }
       row++;
    }
-   if(row==0) AuroraLabel("NoTrades","NO CLOSED TRADES IN THE LAST DAYS",side+18,chartBottom+96,9,C'150,164,184',"Arial");
+   if(row==0) AuroraLabel("NoTrades","NO CLOSED TRADES IN THE LAST DAYS",side+18,chartBottom+62,9,C'150,164,184',"Arial");
    AuroraLabel("TrackerStatus","WINRATE "+DoubleToString(cachedWinRate,1)+"%     DD "+DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%     CANDLE "+FormatClock((int)MathMax(0,Time[0]+PeriodSeconds()-TimeCurrent())),side+18,aurora_h-25,9,C'190,201,213');
    ChartRedraw(0);
 }
@@ -2958,16 +2958,80 @@ void GetDayStats(datetime day,double &pips,double &profit,double &gain,double &l
 //====================================================================
 // NEWS FILTER
 //====================================================================
+// News source: ForexFactory weekly XML (faireconomy CDN). Stable, bot-friendly,
+// unlike the Myfxbook HTML page which rejects non-browser requests.
+string FF_Tag(string block,string tag)
+{
+   string open="<"+tag+">", close="</"+tag+">";
+   int a=StringFind(block,open); if(a<0) return "";
+   a+=StringLen(open);
+   int b=StringFind(block,close,a); if(b<0) return "";
+   string v=StringSubstr(block,a,b-a);
+   int c1=StringFind(v,"<![CDATA[");
+   if(c1>=0){ int c2=StringFind(v,"]]>"); v=StringSubstr(v,c1+9,(c2>c1?c2-c1-9:StringLen(v)-c1-9)); }
+   return TrimString(v);
+}
+void ParseFFXML(string xml)
+{
+   ArrayFree(g_news); g_newsCount=0;
+   int brokerOff=AutoDST_GetBrokerGMTOffsetHours(TimeCurrent());
+   int pos=0;
+   while((pos=StringFind(xml,"<event>",pos))>=0 && g_newsCount<200)
+   {
+      int endPos=StringFind(xml,"</event>",pos); if(endPos<0) break;
+      string ev=StringSubstr(xml,pos,endPos-pos); pos=endPos+8;
+      string title=FF_Tag(ev,"title"), country=FF_Tag(ev,"country");
+      string dateS=FF_Tag(ev,"date"), timeS=FF_Tag(ev,"time"), impS=FF_Tag(ev,"impact");
+      if(country=="" || dateS=="" || timeS=="") continue;
+      int impact=0; if(impS=="High") impact=3; else if(impS=="Medium") impact=2; else if(impS=="Low") impact=1;
+      if(impact==0) continue;
+      if(!((impact==3&&News_HighImpact)||(impact==2&&News_MedImpact))) continue;
+      if(StringFind(News_Currency,country)<0) continue;
+      // time like "8:30am" / "12:15pm"; skip "All Day","Tentative",...
+      StringToLower(timeS);
+      int ap=StringFind(timeS,"am"); bool pm=false;
+      if(ap<0){ ap=StringFind(timeS,"pm"); pm=(ap>=0); }
+      if(ap<0) continue;
+      int colon=StringFind(timeS,":"); if(colon<0) continue;
+      int hh=(int)StringToInteger(StringSubstr(timeS,0,colon));
+      int mn=(int)StringToInteger(StringSubstr(timeS,colon+1,2));
+      if(hh==12) hh=0; if(pm) hh+=12;
+      // date like "09-22-2026" (MM-DD-YYYY), feed times are GMT
+      MqlDateTime dt; ZeroMemory(dt);
+      dt.mon =(int)StringToInteger(StringSubstr(dateS,0,2));
+      dt.day =(int)StringToInteger(StringSubstr(dateS,3,2));
+      dt.year=(int)StringToInteger(StringSubstr(dateS,6,4));
+      dt.hour=hh; dt.min=mn; dt.sec=0;
+      datetime gmt=StructToTime(dt);
+      if(gmt<=0) continue;
+      datetime srv=gmt+brokerOff*3600;
+      if(srv<TimeCurrent()-3600) continue;
+      NewsEvent ne; ne.time=srv; ne.currency=country; ne.impact=impact; ne.title=title;
+      ArrayResize(g_news,g_newsCount+1); g_news[g_newsCount]=ne; g_newsCount++;
+   }
+   Print("News Filter: ",g_newsCount," relevant events parsed (ForexFactory).");
+}
 void RefreshNewsData()
 {
    if(!UseNewsFilter||IsTesting())return; static datetime lastRetry=0;
    if(g_lastNewsDownload!=0 && TimeCurrent()-g_lastNewsDownload<14400)return;
    if(g_lastNewsDownload==0 && TimeCurrent()-lastRetry<300)return;
    Print("News Filter: Refreshing news data..."); lastRetry=TimeCurrent();
-   string url="https://www.myfxbook.com/calendar"; uchar post[],result[]; string result_headers; string headers="User-Agent: MetaTrader/4.00; LONDON_ORB_EA\r\n"; int timeout=5000;
+   string url="https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
+   uchar post[],result[]; string result_headers; string headers="User-Agent: Mozilla/5.0\r\n"; int timeout=5000;
    ResetLastError(); int res=WebRequest("GET",url,headers,timeout,post,result,result_headers);
-   if(res>=200 && res<300){ string html=CharArrayToString(result); if(StringFind(html,"economicCalendarRow")>=0){ ParseMyfxbookHTML(html); g_lastNewsDownload=TimeCurrent(); g_newsStatus="UPDATED"; } else g_newsStatus="PARSE ERROR"; }
-   else { int err=GetLastError(); if(err==4060){ Print("News Filter: URL not allowed in MT4 settings"); g_newsStatus="URL BLOCKED"; } else g_newsStatus="DOWNLOAD FAILED"; }
+   if(res>=200 && res<300)
+   {
+      string xml=CharArrayToString(result);
+      if(StringFind(xml,"<event>")>=0){ ParseFFXML(xml); g_lastNewsDownload=TimeCurrent(); g_newsStatus="UPDATED"; }
+      else g_newsStatus="PARSE ERROR";
+   }
+   else
+   {
+      int err=GetLastError();
+      if(err==4060){ Print("News Filter: add https://nfs.faireconomy.media to Tools>Options>Expert Advisors>Allow WebRequest"); g_newsStatus="ALLOW URL IN OPTIONS"; }
+      else { Print("News Filter: download failed, error ",err); g_newsStatus="DOWNLOAD FAILED"; }
+   }
 }
 void ParseMyfxbookHTML(string html)
 {
