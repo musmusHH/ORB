@@ -1381,7 +1381,7 @@ bool HTP_NewsLine(int i,string &txt,color &clr)
 {
    datetime now=TimeCurrent();
    // collect indexes of future events sorted by time (simple selection)
-   int used[16]; int usedN=0;
+   int used[16]; ArrayInitialize(used,-1); int usedN=0;
    for(int k=0;k<=i;k++)
    {
       datetime best=0; int bi=-1;
@@ -1405,6 +1405,15 @@ bool HTP_NewsLine(int i,string &txt,color &clr)
    return false;
 }
 
+// Card with CENTERED title + value (used for Floating P/L and Today's Gain).
+void AuroraCenterCard(string id,string title,string value,int x,int y,int w,int h,color accent)
+{
+   AuroraRect(id+"BG",x,y,w,h,C'18,34,54',C'47,75,99');
+   AuroraRect(id+"Accent",x,y,3,h,accent);
+   AuroraLabel(id+"K",title,x+w/2,y+6,8,C'190,201,213',"Arial",ANCHOR_UPPER);
+   AuroraLabel(id+"V",value,x+w/2,y+20,11,accent,"Arial Bold",ANCHOR_UPPER);
+}
+
 // Compact period stat card: PROFIT / GAIN% / WINRATE / DD / PF in 3 lines.
 void AuroraPeriodCard(string id,string title,int x,int y,int w,int h)
 {
@@ -1414,13 +1423,14 @@ void AuroraPeriodCard(string id,string title,int x,int y,int w,int h)
    if(title=="DAILY") from=dayStart;
    else if(title=="WEEKLY"){ int dow=dt.day_of_week; if(dow==0) dow=7; from=dayStart-(dow-1)*86400; }        // Monday
    else if(title=="MONTHLY"){ MqlDateTime m=dt; m.day=1; m.hour=0; m.min=0; m.sec=0; from=StructToTime(m); } // 1st of month
-   double net,gain,wr,dd,pf; HTP_PeriodStats(from,net,gain,wr,dd,pf);
+   double net,gain,wr,ddUsd,pf; HTP_PeriodStats(from,net,gain,wr,ddUsd,pf);
    color acc=(net>=0?C'104,244,157':C'255,96,120');
    AuroraRect(id+"BG",x,y,w,h,C'18,34,54',C'47,75,99');
    AuroraRect(id+"Accent",x,y,3,h,acc);
    AuroraLabel(id+"T",title,x+8,y+4,8,C'190,201,213',"Arial Bold");
-   AuroraLabel(id+"P",FormatMoney(net)+"  "+(gain>=0?"+":"")+DoubleToString(gain,2)+"%",x+8,y+16,9,acc,"Arial Bold");
-   AuroraLabel(id+"S","WR "+DoubleToString(wr,0)+"%  DD "+DoubleToString(dd,1)+"%  PF "+DoubleToString(pf,2),x+8,y+31,7,C'160,178,198',"Arial");
+   AuroraLabel(id+"P",FormatMoney(net)+"  "+(gain>=0?"+":"")+DoubleToString(gain,2)+"%",x+8,y+17,9,acc,"Arial Bold");
+   AuroraLabel(id+"S","DD -"+DoubleToString(ddUsd,2)+"$  PF "+DoubleToString(pf,2),x+8,y+31,8,C'160,178,198',"Arial");
+   AuroraLabel(id+"W","WR "+DoubleToString(wr,1)+"%",x+8,y+44,8,C'160,178,198',"Arial");
 }
 
 // Aggregate stats for a period starting at 'from' (0 = whole history).
@@ -1443,8 +1453,9 @@ void HTP_PeriodStats(datetime from,double &netPL,double &gainPct,double &winRate
    if(total==0) return;
    winRate=100.0*wins/total;
    pf=(gLoss>0?gWin/gLoss:(gWin>0?99.9:0));
+   ddPct=maxDD;   // drawdown reported in account currency (USD)
    double balStart=AccountBalance()-netPL;
-   if(balStart>0){ gainPct=100.0*netPL/balStart; ddPct=100.0*maxDD/balStart; }
+   if(balStart>0) gainPct=100.0*netPL/balStart;
 }
 
 // Countdown text for a session: remaining time to close while running,
@@ -1602,7 +1613,7 @@ void AuroraBuild()
 {
    aurora_w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0); aurora_h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
    if(aurora_w<300) aurora_w=1366; if(aurora_h<300) aurora_h=768;   // fallback only if chart not ready yet
-   int side=285, mid=MathMax(300,aurora_w-2*side), chartBottom=MathMax(360,aurora_h-190);
+   int side=285, mid=MathMax(300,aurora_w-2*side), chartBottom=MathMax(340,aurora_h-215);
    // Vertical auto-fit: compress sections below the fixed bitmaps so the
    // BOTTOM OF BOTH SIDE PANELS is always inside the visible chart.
    g_aurora_vs=MathMin(1.0,MathMin((aurora_h-122)/605.0,(aurora_h-188)/550.0));
@@ -1680,12 +1691,14 @@ void AuroraBuild()
    AuroraLabelR("EqCurve","Equity curve",side-24,AR_Y(480)+6,8,C'160,178,198',"Arial");
    AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(584),12,clrWhite,"Arial Bold"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1",">  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2",">  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3",">  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
-   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+16,12,clrWhite,"Arial Bold"); AuroraRefCard("Float","FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-238,chartBottom+8,115,40,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-118,chartBottom+8,105,40,C'104,244,157');
-   // Period performance cards: DAILY / WEEKLY / MONTHLY / TOTAL (profit, gain%, WR, DD, PF).
-   AuroraPeriodCard("PDay","DAILY",side+mid-238,chartBottom+54,115,42);
-   AuroraPeriodCard("PWeek","WEEKLY",side+mid-118,chartBottom+54,105,42);
-   AuroraPeriodCard("PMon","MONTHLY",side+mid-238,chartBottom+100,115,42);
-   AuroraPeriodCard("PTot","TOTAL",side+mid-118,chartBottom+100,105,42);
+   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+16,12,clrWhite,"Arial Bold");
+   AuroraCenterCard("Float","FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-238,chartBottom+8,115,40,C'104,244,157');
+   AuroraCenterCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-118,chartBottom+8,105,40,C'104,244,157');
+   // Period performance cards: DAILY / WEEKLY / MONTHLY / TOTAL (profit, gain%, DD$, PF, WR).
+   AuroraPeriodCard("PDay","DAILY",side+mid-238,chartBottom+54,115,58);
+   AuroraPeriodCard("PWeek","WEEKLY",side+mid-118,chartBottom+54,105,58);
+   AuroraPeriodCard("PMon","MONTHLY",side+mid-238,chartBottom+116,115,58);
+   AuroraPeriodCard("PTot","TOTAL",side+mid-118,chartBottom+116,105,58);
    // 5-DAY PERFORMANCE TABLE built from real closed-trade history.
    string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={48,44,62,56,70,64,58,48,40}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+44,8,C'190,201,213',"Arial"); xx+=widths[h]; }
    int row=0;
