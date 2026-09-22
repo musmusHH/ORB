@@ -1514,9 +1514,14 @@ void HTP_UpdateLiveWidgets(bool force=false)
 {
    MqlDateTime dt; TimeToStruct(TimeCurrent(),dt);
    int curSec=(dt.hour*60+dt.min)*60+dt.sec;
-   if(force || curSec!=g_htp_lastClockMin)
+   // REAL-TIME throttle: in the tester the SERVER second changes many times
+   // per real second, which made the clocks redraw at tick speed (blink).
+   // Redraw the clock bitmaps at most once per ~real second.
+   static uint g_htp_clockMs=0;
+   uint nowMs=GetTickCount();
+   if(force || (curSec!=g_htp_lastClockMin && nowMs-g_htp_clockMs>=800))
    {
-      g_htp_lastClockMin=curSec;
+      g_htp_lastClockMin=curSec; g_htp_clockMs=nowMs;
       HTP_DrawLiveClock("ClockL",g_htp_clockLX,g_htp_clockLY,SESSION_ID_LONDON,C'34,197,94');
       HTP_DrawLiveClock("ClockN",g_htp_clockNX,g_htp_clockNY,SESSION_ID_NEWYORK,C'255,139,34');
       bool inL=false,inN=false;
@@ -1536,7 +1541,13 @@ void HTP_UpdateLiveWidgets(bool force=false)
       {
          // Trade closed or day rolled over -> rebuild UI so the 5-day
          // performance table refreshes with the new history.
-         AuroraDeleteAll(); AuroraBuild();
+         // TESTER GUARD: trades close constantly in the tester; a full
+         // teardown+rebuild on every close destroyed the panels mid-test.
+         // Rebuild at most every 5 real seconds there (values still refresh
+         // every second via AuroraUpdate/AuroraText).
+         static uint g_htp_rebuildMs=0;
+         if(!IsTesting() || nowMs-g_htp_rebuildMs>=5000)
+         { g_htp_rebuildMs=nowMs; AuroraDeleteAll(); AuroraBuild(); }
       }
    }
 }
@@ -1729,6 +1740,19 @@ void AuroraUpdate()
 {
    if(!UseCreativeAuroraUI) return;
    if(ObjectFind(0,aurora_prefix+"RefLeft")<0){ AuroraBuild(); return; }
+   // SIZE WATCHDOG: CHARTEVENT_CHART_CHANGE never fires in the strategy
+   // tester, so a layout built with the fallback size (chart not ready at
+   // OnInit) was never corrected -> bottom strip out of view, panels
+   // overlapping. Re-check the real chart size every ~2s and rebuild once.
+   static uint g_aurSizeMs=0; uint aurNowMs=GetTickCount();
+   if(aurNowMs-g_aurSizeMs>=2000)
+   {
+      g_aurSizeMs=aurNowMs;
+      int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+      int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+      if(cw>300 && ch>300 && (cw!=aurora_w || ch!=aurora_h))
+      { AuroraDeleteAll(); AuroraBuild(); HTP_UpdateLiveWidgets(true); return; }
+   }
    HTP_UpdateLiveWidgets(); // neon rings + countdowns every second, equity curve on new closed trades
    AuroraText("BalV",FormatMoneyAbs(AccountBalance()),clrWhite); AuroraText("EqV",FormatMoneyAbs(AccountEquity()),clrWhite); AuroraText("FMV",FormatMoneyAbs(AccountFreeMargin()),clrWhite); AuroraText("LotV",DoubleToString(CalculateLotSize(FixedSL_Points),2),clrWhite);
    AuroraText("SrvV",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),C'190,201,213'); AuroraText("ActivePLV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("DayPLV",FormatMoney(GetPeriodProfit(0)),C'104,244,157');
@@ -3450,15 +3474,39 @@ void LiveCardDeleteSlot(int slot)
 
 void UpdateLiveTradeCards()
 {
+   static int  g_lcDrawnLast=0;      // cards currently on chart
+   static uint g_lcLastMs=0;         // last refresh time (throttle)
+   static string g_lcLastSig="";     // last rendered content signature
+
    if(!Badge_ShowLiveCard || !Badge_ShowBoxes)
-   { ObjectsDeleteAll(0,livecard_prefix); return; }
+   { if(g_lcDrawnLast>0){ ObjectsDeleteAll(0,livecard_prefix); g_lcDrawnLast=0; g_lcLastSig=""; } return; }
+
+   // Count our open trades first - cheap, no object access.
+   int openCnt=0;
+   for(int c=0;c<OrdersTotal();c++)
+   {
+      if(!OrderSelect(c,SELECT_BY_POS,MODE_TRADES)) continue;
+      if(OrderSymbol()!=Symbol() || OrderType()>1) continue;
+      if(!GlobalHistory && !IsOurMagic(OrderMagicNumber())) continue;
+      openCnt++;
+   }
+   if(openCnt==0)
+   { if(g_lcDrawnLast>0){ ObjectsDeleteAll(0,livecard_prefix); g_lcDrawnLast=0; g_lcLastSig=""; ArrayResize(g_lcTickets,0); ArrayResize(g_lcMAE,0); } return; }
+
+   // THROTTLE: refresh at most every 500ms. Per-tick object writes force
+   // constant chart repaints -> clocks blink, ORB boxes flicker. Never again.
+   uint nowMs=GetTickCount();
+   if(g_lcDrawnLast>0 && nowMs-g_lcLastMs<500) return;
+   g_lcLastMs=nowMs;
 
    int cardW=206, cardH=120, gap=10;
    int baseX=(UseCreativeAuroraUI ? 285+14 : 14), baseY=14;
    double pip=Point; if(Digits==3||Digits==5) pip=Point*10.0;
 
-   int drawn=0;
-   for(int i=0;i<OrdersTotal() && drawn<3;i++)
+   // Build the full content signature; skip ALL object writes if unchanged.
+   string sig=""; int drawn=0;
+   int maxCards=4;
+   for(int i=0;i<OrdersTotal() && drawn<maxCards;i++)
    {
       if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES)) continue;
       if(OrderSymbol()!=Symbol() || OrderType()>1) continue;
@@ -3473,23 +3521,36 @@ void UpdateLiveTradeCards()
       double mae=LiveCardMAE(OrderTicket(),profit);
       double gainPct=(AccountBalance()>0 ? profit/AccountBalance()*100.0 : 0);
 
+      string head=(OrderType()==OP_BUY?"^ BUY ":"v SELL ")+DoubleToString(OrderLots(),2)+" "+Symbol();
+      string entry="ENTRY  "+DoubleToString(OrderOpenPrice(),Digits);
+      string tp="TP "+(OrderTakeProfit()>0?DoubleToString(OrderTakeProfit(),Digits):"--");
+      string sl="SL "+(OrderStopLoss()>0?DoubleToString(OrderStopLoss(),Digits):"--");
+      string pl=FormatMoney(profit)+"  "+(pips>=0?"+":"")+DoubleToString(pips,0)+" pips";
+      string stats="DD -"+DoubleToString(MathAbs(mae),2)+"$  PF "+DoubleToString(cachedPF,2)+"  GAIN "+(gainPct>=0?"+":"")+DoubleToString(gainPct,2)+"%";
+      string sit="SITUATION: "+(win?"WINNING":"LOSING");
+      sig+=head+entry+tp+sl+pl+stats+sit+"|";
+
       string p=livecard_prefix+IntegerToString(drawn)+"_";
       int x=baseX, y=baseY+drawn*(cardH+gap);
+      drawn++;
+      if(sig==StringSubstr(g_lcLastSig,0,StringLen(sig)) && ObjectFind(0,p+"BG")>=0) continue; // this card unchanged
 
       LiveCardRect(p+"BG",x,y,cardW,cardH,C'18,34,54',C'47,75,99');
       LiveCardRect(p+"Rail",x,y,4,cardH,acc,acc);
-      LiveCardText(p+"Head",(OrderType()==OP_BUY?"^ BUY ":"v SELL ")+DoubleToString(OrderLots(),2)+" "+Symbol(),x+12,y+5,9,(OrderType()==OP_BUY?C'0,230,130':C'255,60,80'));
-      LiveCardText(p+"Entry","ENTRY  "+DoubleToString(OrderOpenPrice(),Digits),x+12,y+21,8,C'190,201,213',"Arial");
-      LiveCardText(p+"TP","TP "+(OrderTakeProfit()>0?DoubleToString(OrderTakeProfit(),Digits):"--"),x+12,y+35,8,C'104,244,157',"Arial");
-      LiveCardText(p+"SL","SL "+(OrderStopLoss()>0?DoubleToString(OrderStopLoss(),Digits):"--"),x+108,y+35,8,C'255,96,120',"Arial");
-      LiveCardText(p+"PL",FormatMoney(profit)+"  "+(pips>=0?"+":"")+DoubleToString(pips,0)+" pips",x+12,y+50,11,acc);
+      LiveCardText(p+"Head",head,x+12,y+5,9,(OrderType()==OP_BUY?C'0,230,130':C'255,60,80'));
+      LiveCardText(p+"Entry",entry,x+12,y+21,8,C'190,201,213',"Arial");
+      LiveCardText(p+"TP",tp,x+12,y+35,8,C'104,244,157',"Arial");
+      LiveCardText(p+"SL",sl,x+108,y+35,8,C'255,96,120',"Arial");
+      LiveCardText(p+"PL",pl,x+12,y+50,11,acc);
       LiveCardRect(p+"Div",x+10,y+72,cardW-20,1,C'47,75,99',C'47,75,99');
-      LiveCardText(p+"Stats","DD -"+DoubleToString(MathAbs(mae),2)+"$  PF "+DoubleToString(cachedPF,2)+"  GAIN "+(gainPct>=0?"+":"")+DoubleToString(gainPct,2)+"%",x+12,y+77,7,C'160,178,198',"Arial");
+      LiveCardText(p+"Stats",stats,x+12,y+77,7,C'160,178,198',"Arial");
       LiveCardRect(p+"Strip",x+10,y+93,cardW-20,20,stripB,acc);
-      LiveCardText(p+"Sit","SITUATION: "+(win?"WINNING":"LOSING"),x+cardW/2,y+96,8,acc,"Arial Bold",ANCHOR_UPPER);
-      drawn++;
+      LiveCardText(p+"Sit",sit,x+cardW/2,y+96,8,acc,"Arial Bold",ANCHOR_UPPER);
    }
-   for(int s=drawn;s<3;s++) LiveCardDeleteSlot(s);
+   for(int s=drawn;s<maxCards;s++) if(s<g_lcDrawnLast) LiveCardDeleteSlot(s);
+   bool changed=(sig!=g_lcLastSig || drawn!=g_lcDrawnLast);
+   g_lcDrawnLast=drawn; g_lcLastSig=sig;
+   if(changed) ChartRedraw(0);   // repaint ONLY when card content really changed
 
    // prune MAE memory of tickets no longer open
    for(int m=ArraySize(g_lcTickets)-1;m>=0;m--)
