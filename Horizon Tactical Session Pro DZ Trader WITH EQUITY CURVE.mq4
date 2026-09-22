@@ -1212,6 +1212,25 @@ void HTP_SetBitmapObj(string id,string res,int x,int y,int w,int h,bool rightAnc
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
 }
 
+// DOUBLE-BUFFERED frame commit. MT4 caches bitmap resources BY NAME, so
+// re-creating the same "::name" every second often does not refresh the
+// object (frozen image) or refreshes it visibly (blink). Alternating
+// between two resource names per widget and freeing the previous one
+// gives a seamless, flicker-free live update.
+bool g_htp_tglL=false, g_htp_tglN=false, g_htp_tglEq=false;
+void HTP_CommitFrame(string id,uint &pxbuf[],int w,int h,int x,int y)
+{
+   bool tgl=false;
+   if(id=="ClockL"){ g_htp_tglL=!g_htp_tglL; tgl=g_htp_tglL; }
+   else if(id=="ClockN"){ g_htp_tglN=!g_htp_tglN; tgl=g_htp_tglN; }
+   else { g_htp_tglEq=!g_htp_tglEq; tgl=g_htp_tglEq; }
+   string res   ="::HTP_"+id+(tgl?"_A":"_B");
+   string oldres="::HTP_"+id+(tgl?"_B":"_A");
+   ResourceCreate(res,pxbuf,w,h,0,0,0,1);
+   HTP_SetBitmapObj(id,res,x,y,w,h,true);   // swap object to the fresh frame
+   ResourceFree(oldres);                    // then release the stale frame
+}
+
 // Analog session clock with NEON PROGRESS RING rendered live:
 //  - hands   = real session local time (DST-aware)
 //  - neon arc = fills with elapsed session time (12 o'clock -> close),
@@ -1312,9 +1331,7 @@ void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor
          }
       }
    }
-   string res="::HTP_"+id;
-   ResourceCreate(res,pxbuf,w,h,0,0,0,1);
-   HTP_SetBitmapObj(id,res,x,y,w,h,true);
+   HTP_CommitFrame(id,pxbuf,w,h,x,y);
 }
 
 // Countdown text for a session: remaining time to close while running,
@@ -1363,9 +1380,7 @@ void HTP_DrawLiveEquity(string id,int x,int y)
          prevX=cxp; prevY=cyp;
       }
    }
-   string res="::HTP_"+id;
-   ResourceCreate(res,pxbuf,w,h,0,0,0,1);
-   HTP_SetBitmapObj(id,res,x,y,w,h,true);
+   HTP_CommitFrame(id,pxbuf,w,h,x,y);
 }
 
 // Refresh live widgets: neon rings + countdowns every second,
@@ -1530,7 +1545,7 @@ void AuroraUpdate()
 {
    if(!UseCreativeAuroraUI) return;
    if(ObjectFind(0,aurora_prefix+"RefLeft")<0){ AuroraBuild(); return; }
-   HTP_UpdateLiveWidgets(); // live clocks (per minute) + live equity curve (on new closed trades)
+   HTP_UpdateLiveWidgets(); // neon rings + countdowns every second, equity curve on new closed trades
    AuroraText("BalV",FormatMoneyAbs(AccountBalance()),clrWhite); AuroraText("EqV",FormatMoneyAbs(AccountEquity()),clrWhite); AuroraText("FMV",FormatMoneyAbs(AccountFreeMargin()),clrWhite); AuroraText("LotV",DoubleToString(CalculateLotSize(FixedSL_Points),2),clrWhite);
    AuroraText("SrvV",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),C'190,201,213'); AuroraText("ActivePLV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("DayPLV",FormatMoney(GetPeriodProfit(0)),C'104,244,157');
    AuroraText("TTradesV",IntegerToString(cachedWins+cachedLosses),clrWhite); AuroraText("WinsV",IntegerToString(cachedWins),C'104,244,157'); AuroraText("LossV",IntegerToString(cachedLosses),C'255,96,120'); AuroraText("WinV",DoubleToString(cachedWinRate,1)+"%",C'104,244,157'); AuroraText("PFV",DoubleToString(cachedPF,2),C'104,244,157');
