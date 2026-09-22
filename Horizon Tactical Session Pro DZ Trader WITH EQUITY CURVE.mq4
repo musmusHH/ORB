@@ -445,33 +445,36 @@ bool AutoDST_FindSessionORBRange(int startLocalMinute,
    if(nowServerMin < endServerNow)
       return false;
 
+   // ------------------------------------------------------------------
+   // EXACT 30-MINUTE WINDOW CALCULATION (timeframe-independent).
+   // The opening range is defined strictly by TIME: every candle whose
+   // open time falls inside [session open, session open + OrbDuration)
+   // is aggregated. On an M5 chart that is ALL SIX 5-minute candles of a
+   // 30-minute ORB - never just one. If the chart timeframe is coarser
+   // than 5 minutes, M5 data is used so the range is still exact.
+   // ------------------------------------------------------------------
+   datetime dayBase     = nowServer - (nowServer % 86400);
+   datetime windowStart = dayBase + startServerNow * 60;
+   datetime windowEnd   = dayBase + endServerNow   * 60;   // exclusive
+   if(windowEnd <= windowStart) windowEnd += 86400;        // midnight wrap safety
+
+   int tf = (PeriodSeconds() <= 300) ? Period() : PERIOD_M5;
+
+   int startShift = iBarShift(NULL, tf, windowStart, false);
+   if(startShift < 0)
+      return false;   // M5 history still loading - retry on a later tick
+
    bool found = false;
-   datetime sessionDayAnchor = 0;
-   int maxBars = MathMin(Bars - 1, 500);
-
-   for(int i = 1; i < maxBars; i++)
+   for(int i = startShift; i >= 0; i--)
    {
-      datetime barTime = Time[i];
-      int barServerMin = AutoDST_GetServerMinutes(barTime);
-      int startServerMin=0, endServerBar=0, closeServerBar=0;
-      AutoDST_CalcSessionServerSchedule(barTime, sessionId, startServerMin, endServerBar, closeServerBar);
-
-      if(AutoDST_MinuteInWindow(barServerMin, startServerMin, endServerBar))
-      {
-         if(!found)
-            sessionDayAnchor = barTime;
-
-         if(found && !AutoDST_SameServerDate(barTime, sessionDayAnchor))
-            break;
-
-         if(High[i] > hi) hi = High[i];
-         if(Low[i]  < lo) lo = Low[i];
-         found = true;
-      }
-      else if(found)
-      {
-         break;
-      }
+      datetime bt = iTime(NULL, tf, i);
+      if(bt < windowStart) continue;    // bar before the window (nearest-shift artifact)
+      if(bt >= windowEnd)  break;       // window fully covered
+      double bh = iHigh(NULL, tf, i);
+      double bl = iLow(NULL, tf, i);
+      if(bh > hi) hi = bh;
+      if(bl < lo) lo = bl;
+      found = true;
    }
 
    return (found && hi > 0 && lo < 999999);
