@@ -7,6 +7,15 @@
 #property link      "https://www.mql5.com"
 #property version   "2.00"
 #property strict
+
+//===============================================================
+// EMBEDDED UI ASSETS (compiled into the EA - no external files)
+// Generated to match the HORIZON TACTICAL mockup exactly.
+//===============================================================
+#resource "HorizonAssets\\logo_card.bmp"
+#resource "HorizonAssets\\clock_london.bmp"
+#resource "HorizonAssets\\clock_ny.bmp"
+#resource "HorizonAssets\\equity_curve.bmp"
 //===============================================================
 // AUTO DST CORE FOR EXNESS / LONDON + NEW YORK ORB
 // Server model: FIXED GMT+0 ALL YEAR
@@ -1131,6 +1140,18 @@ bool AuroraBitmap(string id,string file,int x,int y,int w,int h,bool behind=fals
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
    return true;
 }
+// Embedded-resource bitmap (asset compiled into the EA via #resource).
+bool AuroraResBitmap(string id,string res,int x,int y,int w,int h,bool behind=false)
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_BITMAP_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,w); ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
+   ObjectSetString(0,n,OBJPROP_BMPFILE,"::HorizonAssets\\"+res);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER); ObjectSetInteger(0,n,OBJPROP_BACK,behind);
+   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+   return true;
+}
 void AuroraLabel(string id,string text,int x,int y,int size,color clr,string font="Arial Bold",int anchor=ANCHOR_LEFT_UPPER)
 {
    string n=aurora_prefix+id;
@@ -1180,9 +1201,8 @@ void AuroraBuild()
    ChartSetInteger(0,CHART_SHOW_PRICE_SCALE,true); ChartSetInteger(0,CHART_SHOW_DATE_SCALE,true);
    AuroraRect("RefLeft",0,0,side,aurora_h,C'9,20,35',C'33,73,101'); AuroraRect("RefRight",rx,0,side,aurora_h,C'9,20,35',C'33,73,101');
    AuroraRect("RefBottom",side,chartBottom,mid,aurora_h-chartBottom,C'10,25,42',C'34,70,93');
-   AuroraLabel("LogoH","HORIZON",20,22,22,clrWhite,"Arial Bold"); AuroraLabel("LogoT","TACTICAL",20,47,22,C'58,220,221',"Arial Bold"); AuroraLabel("LogoS","Session Pro DZ",20,73,12,clrWhite,"Arial");
-   AuroraLabel("LogoIcon1","+",21,21,26,C'58,220,221',"Arial Bold"); AuroraLabel("LogoIcon2","TARGET",210,35,8,C'255,139,34',"Arial Bold");
-   AuroraRect("LogoCard",10,8,265,86,C'18,34,54',C'47,75,99'); AuroraLabel("LogoH2","HORIZON",70,22,22,clrWhite,"Arial Bold"); AuroraLabel("LogoT2","TACTICAL",70,47,22,C'58,220,221',"Arial Bold"); AuroraLabel("LogoS2","Session Pro DZ",70,73,12,clrWhite,"Arial"); AuroraLabel("LogoCompass","+",24,31,37,C'58,220,221',"Arial Bold"); AuroraLabel("LogoTarget","TARGET",232,30,30,C'255,139,34',"Arial");
+   // Logo card: generated bitmap asset matching the mockup (compass + HORIZON TACTICAL + target).
+   AuroraResBitmap("LogoCard","logo_card.bmp",10,8,265,86);
    AuroraRefCard("Status","EA STATUS","ACTIVE (GREEN)",10,102,265,55,C'104,244,157');
    AuroraRefCard("Srv","DATE / SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),10,164,265,55,C'190,201,213');
    AuroraLabel("AccTitle","ACCOUNT INFO",20,236,20,clrWhite,"Arial");
@@ -1193,12 +1213,15 @@ void AuroraBuild()
    AuroraRefCard("ORBH","ORB HIGH",DoubleToString(lonOrbHigh,2),18,575,124,58,C'190,201,213'); AuroraRefCard("ORBL","ORB LOW",DoubleToString(lonOrbLow,2),151,575,124,58,C'190,201,213'); AuroraRefCard("ORBR","ORB RANGE",DoubleToString(MathAbs(lonOrbHigh-lonOrbLow)/Point,0)+" pips",18,641,124,58,C'58,220,221');
    AuroraLabel("TradeRun","LONDON / NEW YORK ORB  //  RUNNING",18,aurora_h-23,9,C'58,220,221');
    // Right panel: session clocks, performance, P/L, equity, news.
-   AuroraLabel("SesL","LONDON SESSION",rx+16,20,11,clrWhite,"Arial"); AuroraLabel("SesN","NEW YORK SESSION",rx+144,20,11,clrWhite,"Arial"); AuroraRect("ClockL",rx+18,42,112,112,C'17,35,53',C'104,244,157'); AuroraRect("ClockN",rx+150,42,112,112,C'17,35,53',C'255,139,34'); AuroraLabel("ClockLT","LONDON",rx+43,89,13,C'104,244,157',"Arial Bold"); AuroraLabel("ClockNT","NEW YORK",rx+169,89,13,C'255,139,34',"Arial Bold"); AuroraLabel("ClockLV",TimeToString(TimeCurrent(),TIME_MINUTES),rx+42,114,12,clrWhite,"Arial Bold"); AuroraLabel("ClockNV",TimeToString(TimeCurrent(),TIME_MINUTES),rx+174,114,12,clrWhite,"Arial Bold");
+   AuroraLabel("SesL","LONDON SESSION",rx+16,20,11,clrWhite,"Arial"); AuroraLabel("SesN","NEW YORK SESSION",rx+144,20,11,clrWhite,"Arial");
+   // Session clocks: generated analog clock bitmaps (green London arc / orange New York arc) matching the mockup.
+   AuroraResBitmap("ClockL","clock_london.bmp",rx+18,42,112,112); AuroraResBitmap("ClockN","clock_ny.bmp",rx+150,42,112,112);
    AuroraLabel("PerfTitle","PERFORMANCE SUMMARY",rx+16,178,19,clrWhite,"Arial");
    AuroraRefCard("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),rx+18,211,80,58,clrWhite); AuroraRefCard("Wins","WINS",IntegerToString(cachedWins),rx+103,211,80,58,C'104,244,157'); AuroraRefCard("Loss","LOSSES",IntegerToString(cachedLosses),rx+188,211,80,58,C'255,96,120');
    AuroraRefCard("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",rx+18,277,124,58,C'104,244,157'); AuroraRefCard("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),rx+151,277,117,58,C'104,244,157');
    AuroraLabel("PLTitle","P/L METRICS",rx+16,359,19,clrWhite,"Arial"); AuroraRefCard("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),rx+18,392,124,58,C'104,244,157'); AuroraRefCard("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),rx+151,392,117,58,C'104,244,157');
-   AuroraLabel("EqCurve","EQUITY CURVE",rx+18,468,9,C'160,178,198'); AuroraRect("EqBox",rx+18,480,250,72,C'17,35,53',C'47,75,99'); AuroraLine("EqLine",rx+30,525,215,C'58,180,240');
+   // Equity curve widget: generated bitmap asset matching the mockup (rising sky-blue curve on navy).
+   AuroraResBitmap("EqBox","equity_curve.bmp",rx+18,480,250,72);
    AuroraLabel("NewsTitle","NEWS RADAR",rx+16,579,19,clrWhite,"Arial"); AuroraRect("NewsBox",rx+18,610,250,115,C'17,35,53',C'47,75,99'); AuroraLabel("News1","●  News / session filter",rx+28,628,9,C'255,96,120'); AuroraLabel("News2","●  Spread protection active",rx+28,652,9,C'255,139,34'); AuroraLabel("News3","●  ORB execution monitor",rx+28,676,9,C'174,116,255'); AuroraLabel("News4",g_newsStatus,rx+28,700,9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
    AuroraLabel("LiveTitle","LIVE PROFIT TRACKER",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
@@ -1222,7 +1245,7 @@ void AuroraUpdate()
    if(!UseCreativeAuroraUI) return;
    if(ObjectFind(0,aurora_prefix+"RefLeft")<0){ AuroraBuild(); return; }
    AuroraText("BalV",FormatMoneyAbs(AccountBalance()),clrWhite); AuroraText("EqV",FormatMoneyAbs(AccountEquity()),clrWhite); AuroraText("FMV",FormatMoneyAbs(AccountFreeMargin()),clrWhite); AuroraText("LotV",DoubleToString(CalculateLotSize(FixedSL_Points),2),clrWhite);
-   AuroraText("SrvV",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),C'190,201,213'); AuroraText("ClockLV",TimeToString(TimeCurrent(),TIME_MINUTES),C'255,255,255'); AuroraText("ClockNV",TimeToString(TimeCurrent(),TIME_MINUTES),C'255,255,255'); AuroraText("ActivePLV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("DayPLV",FormatMoney(GetPeriodProfit(0)),C'104,244,157');
+   AuroraText("SrvV",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),C'190,201,213'); AuroraText("ActivePLV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("DayPLV",FormatMoney(GetPeriodProfit(0)),C'104,244,157');
    AuroraText("TTradesV",IntegerToString(cachedWins+cachedLosses),clrWhite); AuroraText("WinsV",IntegerToString(cachedWins),C'104,244,157'); AuroraText("LossV",IntegerToString(cachedLosses),C'255,96,120'); AuroraText("WinV",DoubleToString(cachedWinRate,1)+"%",C'104,244,157'); AuroraText("PFV",DoubleToString(cachedPF,2),C'104,244,157');
    AuroraText("FloatV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("GainV",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",C'104,244,157'); AuroraText("News4",g_newsStatus,C'190,201,213'); ChartRedraw(0);
 }
