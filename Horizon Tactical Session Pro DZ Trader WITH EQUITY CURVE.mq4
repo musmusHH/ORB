@@ -775,6 +775,8 @@ input bool   News_MedImpact = true;
 input string News_Currency = "USD,EUR";
 
 input string Inp_UI = "=== GLASSMORPHISM UI ===";
+input bool   UseCreativeAuroraUI = true;
+input string AuroraAssetFolder = "HorizonTactical_Navy_Assets\\MT4_BMP";
 input bool   ShowModernPanel = true;
 input int    UI_PosX = 0;
 input int    UI_PosY = 0;
@@ -1091,6 +1093,139 @@ void ApplyThemeChartColors()
    ChartRedraw(c);
 }
 
+
+//====================================================================
+// CREATIVE AURORA GLASS UI
+// Visual layer only. Trading logic above remains unchanged.
+//====================================================================
+string aurora_prefix="AURORA_";
+int aurora_w=0, aurora_h=0, aurora_left_w=298, aurora_right_w=298;
+
+void AuroraDeleteAll()
+{
+   for(int i=ObjectsTotal(0,-1,-1)-1;i>=0;i--)
+   {
+      string n=ObjectName(0,i,-1);
+      if(StringFind(n,aurora_prefix)==0) ObjectDelete(0,n);
+   }
+}
+void AuroraRect(string id,int x,int y,int w,int h,color bg,color border=clrNONE)
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,MathMax(1,w)); ObjectSetInteger(0,n,OBJPROP_YSIZE,MathMax(1,h));
+   ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg); ObjectSetInteger(0,n,OBJPROP_COLOR,border==clrNONE?bg:border);
+   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT); ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_BACK,false); ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+bool AuroraBitmap(string id,string file,int x,int y,int w,int h,bool behind=false)
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_BITMAP_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   // Keep native bitmap dimensions: MT4 crops when the object is smaller than the asset.
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,w); ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
+   ObjectSetString(0,n,OBJPROP_BMPFILE,AuroraAssetFolder+"\\"+file);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER); ObjectSetInteger(0,n,OBJPROP_BACK,behind);
+   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+   return true;
+}
+void AuroraLabel(string id,string text,int x,int y,int size,color clr,string font="Arial Bold",int anchor=ANCHOR_LEFT_UPPER)
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetString(0,n,OBJPROP_TEXT,text); ObjectSetString(0,n,OBJPROP_FONT,font);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,size); ObjectSetInteger(0,n,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,n,OBJPROP_ANCHOR,anchor); ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+void AuroraText(string id,string text,color clr)
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)>=0){ ObjectSetString(0,n,OBJPROP_TEXT,text); ObjectSetInteger(0,n,OBJPROP_COLOR,clr); }
+}
+void AuroraLine(string id,int x,int y,int w,color clr){ AuroraRect(id,x,y,w,2,clr); }
+void AuroraMetric(string id,string key,string value,int x,int y,color accent)
+{
+   // Tactical Navy metric tile: opaque card, accent rail, compact key/value hierarchy.
+   AuroraRect(id+"BG",x,y-4,260,38,C'15,30,50',C'38,70,94');
+   AuroraRect(id+"Rail",x,y-4,4,38,accent);
+   AuroraLabel(id+"K",key,x+16,y,8,C'160,178,198',"Arial");
+   AuroraLabel(id+"V",value,x+16,y+13,13,clrWhite,"Arial Bold");
+}
+void AuroraCard(string id,int x,int y,int w,int h,string title,string value,color accent)
+{
+   AuroraRect(id+"BG",x,y,w,h,C'18,28,46',C'48,70,98');
+   AuroraLabel(id+"K",title,x+10,y+5,8,C'160,170,190',"Arial Bold");
+   AuroraLabel(id+"V",value,x+10,y+19,11,accent,"Arial Bold");
+}
+void AuroraRefCard(string id,string title,string value,int x,int y,int w,int h,color accent)
+{
+   AuroraRect(id+"BG",x,y,w,h,C'18,34,54',C'47,75,99');
+   AuroraRect(id+"Accent",x,y,3,h,accent);
+   AuroraLabel(id+"K",title,x+10,y+7,9,C'190,201,213',"Arial");
+   AuroraLabel(id+"V",value,x+10,y+23,14,accent,"Arial Bold");
+}
+void AuroraBuild()
+{
+   aurora_w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0); aurora_h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   if(aurora_w<1200) aurora_w=1366; if(aurora_h<500) aurora_h=768;
+   int side=285, rx=aurora_w-side, mid=aurora_w-2*side, chartBottom=MathMax(500,aurora_h-190);
+   ChartSetInteger(0,CHART_MODE,CHART_CANDLES); ChartSetInteger(0,CHART_FOREGROUND,false);
+   ChartSetInteger(0,CHART_COLOR_BACKGROUND,C'7,17,31'); ChartSetInteger(0,CHART_COLOR_GRID,C'35,58,79');
+   ChartSetInteger(0,CHART_COLOR_CANDLE_BULL,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CANDLE_BEAR,C'255,139,34');
+   ChartSetInteger(0,CHART_COLOR_CHART_UP,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CHART_DOWN,C'255,139,34');
+   ChartSetInteger(0,CHART_SHOW_PRICE_SCALE,true); ChartSetInteger(0,CHART_SHOW_DATE_SCALE,true);
+   AuroraRect("RefLeft",0,0,side,aurora_h,C'9,20,35',C'33,73,101'); AuroraRect("RefRight",rx,0,side,aurora_h,C'9,20,35',C'33,73,101');
+   AuroraRect("RefBottom",side,chartBottom,mid,aurora_h-chartBottom,C'10,25,42',C'34,70,93');
+   AuroraLabel("LogoH","HORIZON",20,22,22,clrWhite,"Arial Bold"); AuroraLabel("LogoT","TACTICAL",20,47,22,C'58,220,221',"Arial Bold"); AuroraLabel("LogoS","Session Pro DZ",20,73,12,clrWhite,"Arial");
+   AuroraLabel("LogoIcon1","+",21,21,26,C'58,220,221',"Arial Bold"); AuroraLabel("LogoIcon2","TARGET",210,35,8,C'255,139,34',"Arial Bold");
+   AuroraRect("LogoCard",10,8,265,86,C'18,34,54',C'47,75,99'); AuroraLabel("LogoH2","HORIZON",70,22,22,clrWhite,"Arial Bold"); AuroraLabel("LogoT2","TACTICAL",70,47,22,C'58,220,221',"Arial Bold"); AuroraLabel("LogoS2","Session Pro DZ",70,73,12,clrWhite,"Arial"); AuroraLabel("LogoCompass","+",24,31,37,C'58,220,221',"Arial Bold"); AuroraLabel("LogoTarget","TARGET",232,30,30,C'255,139,34',"Arial");
+   AuroraRefCard("Status","EA STATUS","ACTIVE (GREEN)",10,102,265,55,C'104,244,157');
+   AuroraRefCard("Srv","DATE / SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),10,164,265,55,C'190,201,213');
+   AuroraLabel("AccTitle","ACCOUNT INFO",20,236,20,clrWhite,"Arial");
+   AuroraRefCard("Bal","BALANCE",FormatMoneyAbs(AccountBalance()),18,268,124,58,C'190,201,213'); AuroraRefCard("Eq","EQUITY",FormatMoneyAbs(AccountEquity()),151,268,124,58,C'190,201,213');
+   AuroraRefCard("FM","FREE MARGIN",FormatMoneyAbs(AccountFreeMargin()),18,334,124,58,C'190,201,213'); AuroraRefCard("Lot","LOT SIZE",DoubleToString(CalculateLotSize(FixedSL_Points),2),151,334,124,58,C'190,201,213');
+   AuroraRefCard("DD","DRAWDOWN",DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%",18,400,124,58,C'255,139,34'); AuroraRefCard("Lev","LEVERAGE","1:"+IntegerToString((int)AccountLeverage()),151,400,124,58,C'190,201,213');
+   AuroraLabel("StrTitle","STRATEGY INFO",20,482,20,clrWhite,"Arial"); AuroraRefCard("Strat","CURRENT STRATEGY",OrbTradeMode==MODE_NY_ONLY?"NEW YORK ORB":"LONDON ORB",18,515,257,52,C'58,220,221');
+   AuroraRefCard("ORBH","ORB HIGH",DoubleToString(lonOrbHigh,2),18,575,124,58,C'190,201,213'); AuroraRefCard("ORBL","ORB LOW",DoubleToString(lonOrbLow,2),151,575,124,58,C'190,201,213'); AuroraRefCard("ORBR","ORB RANGE",DoubleToString(MathAbs(lonOrbHigh-lonOrbLow)/Point,0)+" pips",18,641,124,58,C'58,220,221');
+   AuroraLabel("TradeRun","LONDON / NEW YORK ORB  //  RUNNING",18,aurora_h-23,9,C'58,220,221');
+   // Right panel: session clocks, performance, P/L, equity, news.
+   AuroraLabel("SesL","LONDON SESSION",rx+16,20,11,clrWhite,"Arial"); AuroraLabel("SesN","NEW YORK SESSION",rx+144,20,11,clrWhite,"Arial"); AuroraRect("ClockL",rx+18,42,112,112,C'17,35,53',C'104,244,157'); AuroraRect("ClockN",rx+150,42,112,112,C'17,35,53',C'255,139,34'); AuroraLabel("ClockLT","LONDON",rx+43,89,13,C'104,244,157',"Arial Bold"); AuroraLabel("ClockNT","NEW YORK",rx+169,89,13,C'255,139,34',"Arial Bold"); AuroraLabel("ClockLV",TimeToString(TimeCurrent(),TIME_MINUTES),rx+42,114,12,clrWhite,"Arial Bold"); AuroraLabel("ClockNV",TimeToString(TimeCurrent(),TIME_MINUTES),rx+174,114,12,clrWhite,"Arial Bold");
+   AuroraLabel("PerfTitle","PERFORMANCE SUMMARY",rx+16,178,19,clrWhite,"Arial");
+   AuroraRefCard("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),rx+18,211,80,58,clrWhite); AuroraRefCard("Wins","WINS",IntegerToString(cachedWins),rx+103,211,80,58,C'104,244,157'); AuroraRefCard("Loss","LOSSES",IntegerToString(cachedLosses),rx+188,211,80,58,C'255,96,120');
+   AuroraRefCard("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",rx+18,277,124,58,C'104,244,157'); AuroraRefCard("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),rx+151,277,117,58,C'104,244,157');
+   AuroraLabel("PLTitle","P/L METRICS",rx+16,359,19,clrWhite,"Arial"); AuroraRefCard("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),rx+18,392,124,58,C'104,244,157'); AuroraRefCard("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),rx+151,392,117,58,C'104,244,157');
+   AuroraLabel("EqCurve","EQUITY CURVE",rx+18,468,9,C'160,178,198'); AuroraRect("EqBox",rx+18,480,250,72,C'17,35,53',C'47,75,99'); AuroraLine("EqLine",rx+30,525,215,C'58,180,240');
+   AuroraLabel("NewsTitle","NEWS RADAR",rx+16,579,19,clrWhite,"Arial"); AuroraRect("NewsBox",rx+18,610,250,115,C'17,35,53',C'47,75,99'); AuroraLabel("News1","●  News / session filter",rx+28,628,9,C'255,96,120'); AuroraLabel("News2","●  Spread protection active",rx+28,652,9,C'255,139,34'); AuroraLabel("News3","●  ORB execution monitor",rx+28,676,9,C'174,116,255'); AuroraLabel("News4",g_newsStatus,rx+28,700,9,C'190,201,213');
+   // Bottom center tracker modeled on the reference table.
+   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
+   string heads[10]={"TICKET","OPEN TIME","TYPE","LOT","ITEM","PRICE","S/L","T/P","COMMISSION","FLOATING P/L"}; int widths[10]={75,92,42,35,58,62,55,55,78,95}; int xx=side+18; for(int h=0;h<10;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+75,8,C'190,201,213',"Arial"); xx+=widths[h]; }
+   int row=0; for(int oi=0;oi<OrdersTotal() && row<5;oi++)
+   {
+      if(!OrderSelect(oi,SELECT_BY_POS,MODE_TRADES)) continue;
+      xx=side+18; int yy=chartBottom+96+row*20; string vals[10];
+      vals[0]=IntegerToString(OrderTicket()); vals[1]=TimeToString(OrderOpenTime(),TIME_DATE|TIME_MINUTES);
+      vals[2]=(OrderType()==OP_BUY?"BUY":"SELL"); vals[3]=DoubleToString(OrderLots(),2); vals[4]=Symbol();
+      vals[5]=DoubleToString(OrderOpenPrice(),2); vals[6]=DoubleToString(OrderStopLoss(),2); vals[7]=DoubleToString(OrderTakeProfit(),2);
+      vals[8]=FormatMoney(OrderCommission()); vals[9]=FormatMoney(OrderProfit()+OrderSwap()+OrderCommission());
+      for(int q=0;q<10;q++){ AuroraLabel("Row"+IntegerToString(row)+"_"+IntegerToString(q),vals[q],xx,yy,8,(OrderProfit()>=0?C'104,244,157':C'255,96,120'),"Arial"); xx+=widths[q]; }
+      row++;
+   }
+   AuroraLabel("TrackerStatus","WINRATE "+DoubleToString(cachedWinRate,1)+"%     DD "+DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%     CANDLE "+FormatClock((int)MathMax(0,Time[0]+PeriodSeconds()-TimeCurrent())),side+18,aurora_h-25,9,C'190,201,213');
+   ChartRedraw(0);
+}
+void AuroraUpdate()
+{
+   if(!UseCreativeAuroraUI) return;
+   if(ObjectFind(0,aurora_prefix+"RefLeft")<0){ AuroraBuild(); return; }
+   AuroraText("BalV",FormatMoneyAbs(AccountBalance()),clrWhite); AuroraText("EqV",FormatMoneyAbs(AccountEquity()),clrWhite); AuroraText("FMV",FormatMoneyAbs(AccountFreeMargin()),clrWhite); AuroraText("LotV",DoubleToString(CalculateLotSize(FixedSL_Points),2),clrWhite);
+   AuroraText("SrvV",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),C'190,201,213'); AuroraText("ClockLV",TimeToString(TimeCurrent(),TIME_MINUTES),C'255,255,255'); AuroraText("ClockNV",TimeToString(TimeCurrent(),TIME_MINUTES),C'255,255,255'); AuroraText("ActivePLV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("DayPLV",FormatMoney(GetPeriodProfit(0)),C'104,244,157');
+   AuroraText("TTradesV",IntegerToString(cachedWins+cachedLosses),clrWhite); AuroraText("WinsV",IntegerToString(cachedWins),C'104,244,157'); AuroraText("LossV",IntegerToString(cachedLosses),C'255,96,120'); AuroraText("WinV",DoubleToString(cachedWinRate,1)+"%",C'104,244,157'); AuroraText("PFV",DoubleToString(cachedPF,2),C'104,244,157');
+   AuroraText("FloatV",FormatMoney(GetActiveProfit()),C'104,244,157'); AuroraText("GainV",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",C'104,244,157'); AuroraText("News4",g_newsStatus,C'190,201,213'); ChartRedraw(0);
+}
 //====================================================================
 // LIFECYCLE
 //====================================================================
@@ -1123,25 +1258,27 @@ int OnInit()
    if(AutoDST_FindSessionORBRange(lonStartM, lonStartM + Lon_Duration_Min, hi, lo, SESSION_ID_LONDON)){ lonOrbHigh=hi; lonOrbLow=lo; }
    if(AutoDST_FindSessionORBRange(nyStartM, nyStartM + NY_Duration_Min, hi, lo, SESSION_ID_NEWYORK)){ nyOrbHigh=hi; nyOrbLow=lo; }
    ApplyPremiumColors();
-   if(ShowModernPanel){ CreatePremiumUI(); UpdatePremiumUI(); }
+   if(UseCreativeAuroraUI){ AuroraBuild(); AuroraUpdate(); }
+   else { if(ShowModernPanel){ CreatePremiumUI(); UpdatePremiumUI(); }
    if(ShowProfitTracker){ CreateProfitTrackerUI(); UpdateProfitTrackerUI(); }
-   if(ShowCandleCard){ CreateBottomCard(); UpdateBottomCard(); }
+   if(ShowCandleCard){ CreateBottomCard(); UpdateBottomCard(); } }
    CheckClosedTrades();
-   if(ShowEquityCurve){ BuildEquityData(); DrawEquityCurveBox(); }
+   if(ShowEquityCurve && !UseCreativeAuroraUI){ BuildEquityData(); DrawEquityCurveBox(); }
    EventSetTimer(1);
    RefreshNewsData();
    return(INIT_SUCCEEDED);
 }
 
-void OnDeinit(const int reason){ EventKillTimer(); Print("LONDON ORB EA AIT CHIKH MUSTAPHA Removed."); RemoveAllUI(); }
+void OnDeinit(const int reason){ EventKillTimer(); Print("LONDON ORB EA AIT CHIKH MUSTAPHA Removed."); AuroraDeleteAll(); RemoveAllUI(); }
 
 void OnTimer()
 {
    AutoDST_UpdateSessionTimes(TimeCurrent());
    g_uiPulse=!g_uiPulse;
-   if(ShowModernPanel) UpdatePremiumUI();
+   if(UseCreativeAuroraUI) AuroraUpdate();
+   else { if(ShowModernPanel) UpdatePremiumUI();
    if(ShowProfitTracker) UpdateProfitTrackerUI();
-   if(ShowCandleCard) UpdateBottomCard();
+   if(ShowCandleCard) UpdateBottomCard(); }
    CheckClosedTrades(); DrawHistoricalORBLevels();
    static int newsTimer=0; if(++newsTimer>=60){ RefreshNewsData(); newsTimer=0; }
 }
@@ -1157,7 +1294,7 @@ void OnTick()
    if(shouldUpdate)
    {
       lastUIBar=Time[0];
-      if(historyChanged) { RefreshStatsCache(); if(ShowEquityCurve){ BuildEquityData(); DrawEquityCurveBox(); } }
+      if(historyChanged) { RefreshStatsCache(); if(ShowEquityCurve && !UseCreativeAuroraUI){ BuildEquityData(); DrawEquityCurveBox(); } }
       if(Badge_ShowBoxes) CheckClosedTrades();
       if(isNewBar) RefreshNewsData();
       double hi,lo;
@@ -1165,9 +1302,10 @@ void OnTick()
       int nyStartM  = NY_Start_Hour * 60 + NY_Start_Minute;
       if(FindSessionORBRange(lonStartM, lonStartM + Lon_Duration_Min, hi, lo, Lon_GMT_Offset)){ lonOrbHigh=hi; lonOrbLow=lo; }
       if(FindSessionORBRange(nyStartM, nyStartM + NY_Duration_Min, hi, lo, NY_GMT_Offset)){ nyOrbHigh=hi; nyOrbLow=lo; }
-      if(ShowModernPanel) UpdatePremiumUI();
+      if(UseCreativeAuroraUI) AuroraUpdate();
+      else { if(ShowModernPanel) UpdatePremiumUI();
       if(ShowProfitTracker) UpdateProfitTrackerUI();
-      if(ShowCandleCard) UpdateBottomCard();
+      if(ShowCandleCard) UpdateBottomCard(); }
       DrawHistoricalORBLevels();
    }
    if(IsNewsTime() || !EA_Enabled) return;
@@ -1898,11 +2036,11 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
          if(ShowCandleCard) UpdateBottomCard();
          CheckClosedTrades();
          DrawHistoricalORBLevels();
-         if(ShowEquityCurve){ BuildEquityData(); DrawEquityCurveBox(); }
+         if(ShowEquityCurve && !UseCreativeAuroraUI){ BuildEquityData(); DrawEquityCurveBox(); }
       }
       else if(sparam==ui_prefix+"ToggleEA"){ EA_Enabled=!EA_Enabled; ObjectSetInteger(0,ui_prefix+"ToggleEA",OBJPROP_STATE,false); UpdatePremiumUI(); }
       else if(sparam==ui_prefix+"ToggleCurr"){ DisplayDZD=!DisplayDZD; ObjectSetInteger(0,ui_prefix+"ToggleCurr",OBJPROP_STATE,false); UpdatePremiumUI(); if(ShowProfitTracker)UpdateProfitTrackerUI(); if(ShowCandleCard)UpdateBottomCard(); CheckClosedTrades(); }
-      else if(sparam==ui_prefix+"TogglePanel"){ UI_Collapsed=!UI_Collapsed; ObjectSetInteger(0,ui_prefix+"TogglePanel",OBJPROP_STATE,false); RemoveAllUI(); if(ShowModernPanel)CreatePremiumUI(); if(ShowProfitTracker)CreateProfitTrackerUI(); if(ShowCandleCard)CreateBottomCard(); UpdatePremiumUI(); UpdateProfitTrackerUI(); if(ShowCandleCard)UpdateBottomCard(); CheckClosedTrades(); if(ShowEquityCurve){ BuildEquityData(); DrawEquityCurveBox(); } }
+      else if(sparam==ui_prefix+"TogglePanel"){ UI_Collapsed=!UI_Collapsed; ObjectSetInteger(0,ui_prefix+"TogglePanel",OBJPROP_STATE,false); RemoveAllUI(); if(ShowModernPanel)CreatePremiumUI(); if(ShowProfitTracker)CreateProfitTrackerUI(); if(ShowCandleCard)CreateBottomCard(); UpdatePremiumUI(); UpdateProfitTrackerUI(); if(ShowCandleCard)UpdateBottomCard(); CheckClosedTrades(); if(ShowEquityCurve && !UseCreativeAuroraUI){ BuildEquityData(); DrawEquityCurveBox(); } }
       else if(sparam==tracker_prefix+"SaveBtn"){ ObjectSetInteger(0,tracker_prefix+"SaveBtn",OBJPROP_STATE,false); SaveTradeHistoryToHTML(); }
       
       // Weekdays Buttons Event Handling (المطلب الثاني - معالجة الأحداث)
