@@ -1117,6 +1117,7 @@ void AuroraDeleteAll()
       if(StringFind(n,aurora_prefix)==0) ObjectDelete(0,n);
    }
 }
+// Solid raised card style: BORDER_RAISED gives the classic 3D solid edge.
 void AuroraRect(string id,int x,int y,int w,int h,color bg,color border=clrNONE)
 {
    string n=aurora_prefix+id;
@@ -1124,7 +1125,8 @@ void AuroraRect(string id,int x,int y,int w,int h,color bg,color border=clrNONE)
    ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
    ObjectSetInteger(0,n,OBJPROP_XSIZE,MathMax(1,w)); ObjectSetInteger(0,n,OBJPROP_YSIZE,MathMax(1,h));
    ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg); ObjectSetInteger(0,n,OBJPROP_COLOR,border==clrNONE?bg:border);
-   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT); ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
    ObjectSetInteger(0,n,OBJPROP_BACK,false); ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
 }
 bool AuroraBitmap(string id,string file,int x,int y,int w,int h,bool behind=false)
@@ -1187,19 +1189,22 @@ void HTP_Line(uint &buf[],int w,int h,int x0,int y0,int x1,int y1,uint c)
    }
 }
 
-void HTP_SetBitmapObj(string id,string res,int x,int y,int w,int h)
+// rightAnchor=true -> x is the distance from the chart's RIGHT edge to the
+// bitmap's RIGHT edge (CORNER_RIGHT_UPPER), so it never leaves the view.
+void HTP_SetBitmapObj(string id,string res,int x,int y,int w,int h,bool rightAnchor=false)
 {
    string n=aurora_prefix+id;
    if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_BITMAP_LABEL,0,0,0);
    ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
    ObjectSetInteger(0,n,OBJPROP_XSIZE,w); ObjectSetInteger(0,n,OBJPROP_YSIZE,h);
    ObjectSetString(0,n,OBJPROP_BMPFILE,res);
-   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER); ObjectSetInteger(0,n,OBJPROP_BACK,false);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,rightAnchor?CORNER_RIGHT_UPPER:CORNER_LEFT_UPPER); ObjectSetInteger(0,n,OBJPROP_BACK,false);
    ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
 }
 
 // Analog session clock rendered live: hands = real session local time,
 // colored arc = the session window (open -> close) on the 12h dial.
+// x = distance from the chart's RIGHT edge to the clock's RIGHT edge (right-anchored).
 void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor)
 {
    int w=112,h=112;
@@ -1266,10 +1271,11 @@ void HTP_DrawLiveClock(string id,int x,int y,ENUM_SESSION_ID sess,color arcColor
    }
    string res="::HTP_"+id;
    ResourceCreate(res,pxbuf,w,h,0,0,0,1);
-   HTP_SetBitmapObj(id,res,x,y,w,h);
+   HTP_SetBitmapObj(id,res,x,y,w,h,true);
 }
 
 // Equity curve rendered live from actual closed-trade history (g_eqBalances).
+// x = distance from the chart's RIGHT edge to the panel's RIGHT edge (right-anchored).
 void HTP_DrawLiveEquity(string id,int x,int y)
 {
    int w=250,h=72;
@@ -1301,7 +1307,7 @@ void HTP_DrawLiveEquity(string id,int x,int y)
    }
    string res="::HTP_"+id;
    ResourceCreate(res,pxbuf,w,h,0,0,0,1);
-   HTP_SetBitmapObj(id,res,x,y,w,h);
+   HTP_SetBitmapObj(id,res,x,y,w,h,true);
 }
 
 // Refresh live widgets: clocks once per minute, equity when history changes.
@@ -1359,17 +1365,50 @@ void AuroraRefCard(string id,string title,string value,int x,int y,int w,int h,c
    AuroraLabel(id+"K",title,x+10,y+7,9,C'190,201,213',"Arial");
    AuroraLabel(id+"V",value,x+10,y+23,14,accent,"Arial Bold");
 }
+//--- RIGHT-ANCHORED variants (CORNER_RIGHT_UPPER): XDISTANCE is measured from
+//--- the chart's real renderable right edge, so the right panel can never
+//--- fall outside the view, whatever the window size or price-scale width.
+//--- Objects always extend right/down, so xl = distance from the right edge
+//--- to the element's LEFT side.
+void AuroraRectR(string id,int xl,int y,int w,int h,color bg,color border=clrNONE)
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,xl); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,MathMax(1,w)); ObjectSetInteger(0,n,OBJPROP_YSIZE,MathMax(1,h));
+   ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg); ObjectSetInteger(0,n,OBJPROP_COLOR,border==clrNONE?bg:border);
+   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_RAISED);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_BACK,false); ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+void AuroraLabelR(string id,string text,int xl,int y,int size,color clr,string font="Arial Bold")
+{
+   string n=aurora_prefix+id;
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,xl); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetString(0,n,OBJPROP_TEXT,text); ObjectSetString(0,n,OBJPROP_FONT,font);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,size); ObjectSetInteger(0,n,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,n,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER); ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_RIGHT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+void AuroraRefCardR(string id,string title,string value,int xl,int y,int w,int h,color accent)
+{
+   AuroraRectR(id+"BG",xl,y,w,h,C'18,34,54',C'47,75,99');
+   AuroraRectR(id+"Accent",xl,y,3,h,accent);
+   AuroraLabelR(id+"K",title,xl-10,y+7,9,C'190,201,213',"Arial");
+   AuroraLabelR(id+"V",value,xl-10,y+23,14,accent,"Arial Bold");
+}
 void AuroraBuild()
 {
    aurora_w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0); aurora_h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
-   if(aurora_w<1200) aurora_w=1366; if(aurora_h<500) aurora_h=768;
-   int side=285, rx=aurora_w-side, mid=aurora_w-2*side, chartBottom=MathMax(500,aurora_h-190);
+   if(aurora_w<300) aurora_w=1366; if(aurora_h<300) aurora_h=768;   // fallback only if chart not ready yet
+   int side=285, mid=MathMax(300,aurora_w-2*side), chartBottom=MathMax(360,aurora_h-190);
    ChartSetInteger(0,CHART_MODE,CHART_CANDLES); ChartSetInteger(0,CHART_FOREGROUND,false);
    ChartSetInteger(0,CHART_COLOR_BACKGROUND,C'7,17,31'); ChartSetInteger(0,CHART_COLOR_GRID,C'35,58,79');
    ChartSetInteger(0,CHART_COLOR_CANDLE_BULL,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CANDLE_BEAR,C'255,139,34');
    ChartSetInteger(0,CHART_COLOR_CHART_UP,C'53,220,210'); ChartSetInteger(0,CHART_COLOR_CHART_DOWN,C'255,139,34');
    ChartSetInteger(0,CHART_SHOW_PRICE_SCALE,true); ChartSetInteger(0,CHART_SHOW_DATE_SCALE,true);
-   AuroraRect("RefLeft",0,0,side,aurora_h,C'9,20,35',C'33,73,101'); AuroraRect("RefRight",rx,0,side,aurora_h,C'9,20,35',C'33,73,101');
+   AuroraRect("RefLeft",0,0,side,aurora_h,C'9,20,35',C'33,73,101'); AuroraRectR("RefRight",side,0,side,aurora_h,C'9,20,35',C'33,73,101');
    AuroraRect("RefBottom",side,chartBottom,mid,aurora_h-chartBottom,C'10,25,42',C'34,70,93');
    // Logo card: generated bitmap asset matching the mockup (compass + HORIZON TACTICAL + target).
    AuroraResBitmap("LogoCard","logo_card.bmp",10,8,265,86);
@@ -1382,21 +1421,22 @@ void AuroraBuild()
    AuroraLabel("StrTitle","STRATEGY INFO",20,482,20,clrWhite,"Arial"); AuroraRefCard("Strat","CURRENT STRATEGY",OrbTradeMode==MODE_NY_ONLY?"NEW YORK ORB":"LONDON ORB",18,515,257,52,C'58,220,221');
    AuroraRefCard("ORBH","ORB HIGH",DoubleToString(lonOrbHigh,2),18,575,124,58,C'190,201,213'); AuroraRefCard("ORBL","ORB LOW",DoubleToString(lonOrbLow,2),151,575,124,58,C'190,201,213'); AuroraRefCard("ORBR","ORB RANGE",DoubleToString(MathAbs(lonOrbHigh-lonOrbLow)/Point,0)+" pips",18,641,124,58,C'58,220,221');
    AuroraLabel("TradeRun","LONDON / NEW YORK ORB  //  RUNNING",18,aurora_h-23,9,C'58,220,221');
-   // Right panel: session clocks, performance, P/L, equity, news.
-   AuroraLabel("SesL","LONDON SESSION",rx+16,20,11,clrWhite,"Arial"); AuroraLabel("SesN","NEW YORK SESSION",rx+144,20,11,clrWhite,"Arial");
+   // Right panel: ANCHORED TO THE RIGHT EDGE (CORNER_RIGHT_UPPER) so it always
+   // stays fully visible regardless of the window / chart size.
+   AuroraLabelR("SesL","LONDON SESSION",side-16,20,11,clrWhite,"Arial"); AuroraLabelR("SesN","NEW YORK SESSION",side-144,20,11,clrWhite,"Arial");
    // Session clocks: LIVE analog clocks (real DST-aware London/NY time, session arc = actual session window).
-   g_htp_clockLX=rx+18; g_htp_clockLY=42; g_htp_clockNX=rx+150; g_htp_clockNY=42;
+   g_htp_clockLX=side-18; g_htp_clockLY=42; g_htp_clockNX=side-150; g_htp_clockNY=42;   // distance from RIGHT edge to clock's LEFT side
    HTP_DrawLiveClock("ClockL",g_htp_clockLX,g_htp_clockLY,SESSION_ID_LONDON,C'34,197,94');
    HTP_DrawLiveClock("ClockN",g_htp_clockNX,g_htp_clockNY,SESSION_ID_NEWYORK,C'255,139,34');
-   AuroraLabel("PerfTitle","PERFORMANCE SUMMARY",rx+16,178,19,clrWhite,"Arial");
-   AuroraRefCard("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),rx+18,211,80,58,clrWhite); AuroraRefCard("Wins","WINS",IntegerToString(cachedWins),rx+103,211,80,58,C'104,244,157'); AuroraRefCard("Loss","LOSSES",IntegerToString(cachedLosses),rx+188,211,80,58,C'255,96,120');
-   AuroraRefCard("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",rx+18,277,124,58,C'104,244,157'); AuroraRefCard("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),rx+151,277,117,58,C'104,244,157');
-   AuroraLabel("PLTitle","P/L METRICS",rx+16,359,19,clrWhite,"Arial"); AuroraRefCard("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),rx+18,392,124,58,C'104,244,157'); AuroraRefCard("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),rx+151,392,117,58,C'104,244,157');
+   AuroraLabelR("PerfTitle","PERFORMANCE SUMMARY",side-16,178,15,clrWhite,"Arial");
+   AuroraRefCardR("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),side-18,211,80,58,clrWhite); AuroraRefCardR("Wins","WINS",IntegerToString(cachedWins),side-103,211,80,58,C'104,244,157'); AuroraRefCardR("Loss","LOSSES",IntegerToString(cachedLosses),side-188,211,80,58,C'255,96,120');
+   AuroraRefCardR("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",side-18,277,124,58,C'104,244,157'); AuroraRefCardR("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),side-151,277,117,58,C'104,244,157');
+   AuroraLabelR("PLTitle","P/L METRICS",side-16,359,15,clrWhite,"Arial"); AuroraRefCardR("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),side-18,392,124,58,C'104,244,157'); AuroraRefCardR("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),side-151,392,117,58,C'104,244,157');
    // Equity curve widget: LIVE curve drawn from actual closed-trade history (mockup style).
-   g_htp_eqX=rx+18; g_htp_eqY=480;
+   g_htp_eqX=side-18; g_htp_eqY=480;   // distance from RIGHT edge to panel's LEFT side
    HTP_DrawLiveEquity("EqBox",g_htp_eqX,g_htp_eqY);
-   AuroraLabel("EqCurve","Equity curve",rx+24,486,8,C'160,178,198',"Arial");
-   AuroraLabel("NewsTitle","NEWS RADAR",rx+16,579,19,clrWhite,"Arial"); AuroraRect("NewsBox",rx+18,610,250,115,C'17,35,53',C'47,75,99'); AuroraLabel("News1","●  News / session filter",rx+28,628,9,C'255,96,120'); AuroraLabel("News2","●  Spread protection active",rx+28,652,9,C'255,139,34'); AuroraLabel("News3","●  ORB execution monitor",rx+28,676,9,C'174,116,255'); AuroraLabel("News4",g_newsStatus,rx+28,700,9,C'190,201,213');
+   AuroraLabelR("EqCurve","Equity curve",side-24,486,8,C'160,178,198',"Arial");
+   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,579,15,clrWhite,"Arial"); AuroraRectR("NewsBox",side-18,610,250,115,C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,628,9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,652,9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,676,9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,700,9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
    AuroraLabel("LiveTitle","LIVE PROFIT TRACKER",side+18,chartBottom+12,19,clrWhite,"Arial"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
    string heads[10]={"TICKET","OPEN TIME","TYPE","LOT","ITEM","PRICE","S/L","T/P","COMMISSION","FLOATING P/L"}; int widths[10]={75,92,42,35,58,62,55,55,78,95}; int xx=side+18; for(int h=0;h<10;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+75,8,C'190,201,213',"Arial"); xx+=widths[h]; }
@@ -2217,6 +2257,19 @@ void UpdateLabel(string id,string text,color clr){ ObjectSetString(0,ui_prefix+i
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
 {
+   // Rebuild the Aurora UI when the chart window is resized so every panel
+   // stays inside the view (right panel is right-anchored, bottom re-flows).
+   if(id==CHARTEVENT_CHART_CHANGE && UseCreativeAuroraUI)
+   {
+      int cw=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+      int ch=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+      if(cw>0 && ch>0 && (cw!=aurora_w || ch!=aurora_h))
+      {
+         AuroraDeleteAll();
+         AuroraBuild();
+         HTP_UpdateLiveWidgets(true);
+      }
+   }
    if(id==CHARTEVENT_OBJECT_CLICK)
    {
       if(sparam==tracker_prefix+"ToggleTheme" || sparam==ui_prefix+"ToggleTheme")
