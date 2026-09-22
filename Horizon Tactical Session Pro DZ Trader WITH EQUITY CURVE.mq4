@@ -841,6 +841,7 @@ input color  Badge_WinTextColor      = clrWhite;           // Winning Trade Text
 input color  Badge_LossTextColor     = clrDarkOrange;           // Losing Trade Text Color
 input color  Badge_WinLineColor      = C'0,230,130';           // Winning Top Neon Line Color
 input color  Badge_LossLineColor     = C'255,60,80';           // Losing Top Neon Line Color
+input bool   Badge_ShowLiveCard      = true;                   // Show LIVE Trade Info Card (Entry/TP/SL/PL/DD/PF)
 
 input string Inp_EquityCurve          = "=== EQUITY CURVE BOX (TOP-RIGHT CORNER) ===";
 input bool   ShowEquityCurve          = true;                  // Show Equity Curve Box
@@ -1807,6 +1808,7 @@ void OnTimer()
    if(ShowProfitTracker) UpdateProfitTrackerUI();
    if(ShowCandleCard) UpdateBottomCard(); }
    CheckClosedTrades(); DrawHistoricalORBLevels();
+   UpdateLiveTradeCards();   // keep live card ticking even without incoming ticks (weekend/quiet market)
    static int newsTimer=0; if(++newsTimer>=60){ RefreshNewsData(); newsTimer=0; }
 }
 
@@ -1815,6 +1817,7 @@ void OnTick()
    AutoDST_UpdateSessionTimes(TimeCurrent());
    if(Bars<10) return;
    ManageOpenTrades();
+   UpdateLiveTradeCards();   // live trade info card: refresh P/L, colors, situation each tick
    bool isNewBar=(Time[0]!=lastUIBar); bool historyChanged=(OrdersHistoryTotal()!=lastHistoryCount); tickCounter++;
    bool shouldUpdate=isNewBar||historyChanged;
    if(IsTesting()){ if(tickCounter%50==0) shouldUpdate=true; } else { if(tickCounter%5==0) shouldUpdate=true; }
@@ -2910,7 +2913,7 @@ void UpdateBottomCard()
    UpdateBottomMeter("BC", meterPct, isOverlap ? (Card_UseThemeColors ? C_Info_Glow : accentClr) : sessTimerClr, meterBg);
 }
 
-void RemoveAllUI(){ ObjectsDeleteAll(0,ui_prefix); ObjectsDeleteAll(0,tracker_prefix); ObjectsDeleteAll(0,eq_prefix); ObjectsDeleteAll(0,"ORB_Lv_"); ObjectsDeleteAll(0,"ORB_Box_"); ObjectsDeleteAll(0,"Result_"); ObjectsDeleteAll(0,"Badge"); ObjectsDeleteAll(0,"Pointer_"); ChartRedraw(0); }
+void RemoveAllUI(){ ObjectsDeleteAll(0,ui_prefix); ObjectsDeleteAll(0,tracker_prefix); ObjectsDeleteAll(0,eq_prefix); ObjectsDeleteAll(0,"ORB_Lv_"); ObjectsDeleteAll(0,"ORB_Box_"); ObjectsDeleteAll(0,"Result_"); ObjectsDeleteAll(0,"Badge"); ObjectsDeleteAll(0,"Pointer_"); ObjectsDeleteAll(0,"LIVEC_"); ChartRedraw(0); }
 void RemoveTrackerUI(){ ObjectsDeleteAll(0,tracker_prefix); }
 
 //====================================================================
@@ -3399,6 +3402,110 @@ void DrawHistoricalORBLevels()
    if(OrbTradeMode == MODE_NY_ONLY || OrbTradeMode == MODE_BOTH_SESSIONS)
       AutoDST_DrawSessionHistorical(NY_Start_Hour, NY_Start_Minute, NY_Duration_Min, NY_End_Hour, SESSION_ID_NEWYORK, "NY", clrAqua, clrMagenta, C_OrbFill_NY);
 }
+//====================================================================
+// LIVE TRADE INFO CARD (opt1 design)
+// One card per open ticket: ENTRY / TP / SL / live P&L in $ and pips,
+// DD (max adverse excursion of the trade), PF (account), GAIN% and a
+// SITUATION strip. Whole card accent flips green/red with P&L sign.
+//====================================================================
+string livecard_prefix="LIVEC_";
+int    g_lcTickets[];  double g_lcMAE[];   // per-ticket worst (most negative) P/L seen
+
+double LiveCardMAE(int ticket,double curProfit)
+{
+   int n=ArraySize(g_lcTickets);
+   for(int i=0;i<n;i++)
+      if(g_lcTickets[i]==ticket)
+      { if(curProfit<g_lcMAE[i]) g_lcMAE[i]=curProfit; return MathMin(g_lcMAE[i],0.0); }
+   ArrayResize(g_lcTickets,n+1); ArrayResize(g_lcMAE,n+1);
+   g_lcTickets[n]=ticket; g_lcMAE[n]=MathMin(curProfit,0.0);
+   return g_lcMAE[n];
+}
+
+void LiveCardRect(string n,int x,int y,int w,int h,color bg,color border)
+{
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,n,OBJPROP_XSIZE,MathMax(1,w)); ObjectSetInteger(0,n,OBJPROP_YSIZE,MathMax(1,h));
+   ObjectSetInteger(0,n,OBJPROP_BGCOLOR,bg); ObjectSetInteger(0,n,OBJPROP_COLOR,border);
+   ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+   ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_BACK,false); ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+void LiveCardText(string n,string text,int x,int y,int size,color clr,string font="Arial Bold",int anchor=ANCHOR_LEFT_UPPER)
+{
+   if(ObjectFind(0,n)<0) ObjectCreate(0,n,OBJ_LABEL,0,0,0);
+   ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y);
+   ObjectSetString(0,n,OBJPROP_TEXT,text); ObjectSetString(0,n,OBJPROP_FONT,font);
+   ObjectSetInteger(0,n,OBJPROP_FONTSIZE,size); ObjectSetInteger(0,n,OBJPROP_COLOR,clr);
+   ObjectSetInteger(0,n,OBJPROP_ANCHOR,anchor); ObjectSetInteger(0,n,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+   ObjectSetInteger(0,n,OBJPROP_BACK,false); ObjectSetInteger(0,n,OBJPROP_SELECTABLE,false); ObjectSetInteger(0,n,OBJPROP_HIDDEN,true);
+}
+void LiveCardDeleteSlot(int slot)
+{
+   string p=livecard_prefix+IntegerToString(slot)+"_";
+   for(int i=ObjectsTotal(0,-1,-1)-1;i>=0;i--)
+   { string n=ObjectName(0,i,-1); if(StringFind(n,p)==0) ObjectDelete(0,n); }
+}
+
+void UpdateLiveTradeCards()
+{
+   if(!Badge_ShowLiveCard || !Badge_ShowBoxes)
+   { ObjectsDeleteAll(0,livecard_prefix); return; }
+
+   int cardW=206, cardH=120, gap=10;
+   int baseX=(UseCreativeAuroraUI ? 285+14 : 14), baseY=14;
+   double pip=Point; if(Digits==3||Digits==5) pip=Point*10.0;
+
+   int drawn=0;
+   for(int i=0;i<OrdersTotal() && drawn<3;i++)
+   {
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_TRADES)) continue;
+      if(OrderSymbol()!=Symbol() || OrderType()>1) continue;
+      if(!GlobalHistory && !IsOurMagic(OrderMagicNumber())) continue;
+
+      double profit=OrderProfit()+OrderSwap()+OrderCommission();
+      bool   win=(profit>=0);
+      color  acc   =(win ? C'0,230,130'  : C'255,60,80');
+      color  stripB=(win ? C'10,46,32'   : C'58,16,26');
+      double cur=(OrderType()==OP_BUY ? Bid : Ask);
+      double pips=(OrderType()==OP_BUY ? (cur-OrderOpenPrice()) : (OrderOpenPrice()-cur))/pip;
+      double mae=LiveCardMAE(OrderTicket(),profit);
+      double gainPct=(AccountBalance()>0 ? profit/AccountBalance()*100.0 : 0);
+
+      string p=livecard_prefix+IntegerToString(drawn)+"_";
+      int x=baseX, y=baseY+drawn*(cardH+gap);
+
+      LiveCardRect(p+"BG",x,y,cardW,cardH,C'18,34,54',C'47,75,99');
+      LiveCardRect(p+"Rail",x,y,4,cardH,acc,acc);
+      LiveCardText(p+"Head",(OrderType()==OP_BUY?"^ BUY ":"v SELL ")+DoubleToString(OrderLots(),2)+" "+Symbol(),x+12,y+5,9,(OrderType()==OP_BUY?C'0,230,130':C'255,60,80'));
+      LiveCardText(p+"Entry","ENTRY  "+DoubleToString(OrderOpenPrice(),Digits),x+12,y+21,8,C'190,201,213',"Arial");
+      LiveCardText(p+"TP","TP "+(OrderTakeProfit()>0?DoubleToString(OrderTakeProfit(),Digits):"--"),x+12,y+35,8,C'104,244,157',"Arial");
+      LiveCardText(p+"SL","SL "+(OrderStopLoss()>0?DoubleToString(OrderStopLoss(),Digits):"--"),x+108,y+35,8,C'255,96,120',"Arial");
+      LiveCardText(p+"PL",FormatMoney(profit)+"  "+(pips>=0?"+":"")+DoubleToString(pips,0)+" pips",x+12,y+50,11,acc);
+      LiveCardRect(p+"Div",x+10,y+72,cardW-20,1,C'47,75,99',C'47,75,99');
+      LiveCardText(p+"Stats","DD -"+DoubleToString(MathAbs(mae),2)+"$  PF "+DoubleToString(cachedPF,2)+"  GAIN "+(gainPct>=0?"+":"")+DoubleToString(gainPct,2)+"%",x+12,y+77,7,C'160,178,198',"Arial");
+      LiveCardRect(p+"Strip",x+10,y+93,cardW-20,20,stripB,acc);
+      LiveCardText(p+"Sit","SITUATION: "+(win?"WINNING":"LOSING"),x+cardW/2,y+96,8,acc,"Arial Bold",ANCHOR_UPPER);
+      drawn++;
+   }
+   for(int s=drawn;s<3;s++) LiveCardDeleteSlot(s);
+
+   // prune MAE memory of tickets no longer open
+   for(int m=ArraySize(g_lcTickets)-1;m>=0;m--)
+   {
+      bool still=false;
+      for(int o=0;o<OrdersTotal();o++)
+         if(OrderSelect(o,SELECT_BY_POS,MODE_TRADES) && OrderTicket()==g_lcTickets[m]){ still=true; break; }
+      if(!still)
+      {
+         int last=ArraySize(g_lcTickets)-1;
+         g_lcTickets[m]=g_lcTickets[last]; g_lcMAE[m]=g_lcMAE[last];
+         ArrayResize(g_lcTickets,last); ArrayResize(g_lcMAE,last);
+      }
+   }
+}
+
 void DrawTradeResult(int ticket,double profit,double price,datetime time,int count=1)
 {
    if(!Badge_ShowBoxes) return;
@@ -3499,7 +3606,8 @@ void DrawTradeResult(int ticket,double profit,double price,datetime time,int cou
    
    double dispProfit = DisplayDZD ? profit * USD_DZD_Rate : profit;
    string cntStr     = (count > 1) ? " (" + IntegerToString(count) + ")" : "";
-   string text = DisplayDZD ? ((dispProfit>=0?"+":"-")+DoubleToString(MathAbs(dispProfit),0)+" DZD"+cntStr) : ((dispProfit>=0?"+$":"-$")+DoubleToString(MathAbs(dispProfit),2)+cntStr);
+   string sitTag     = (profit>=0 ? "WIN " : "LOSS ");
+   string text = DisplayDZD ? (sitTag+(dispProfit>=0?"+":"-")+DoubleToString(MathAbs(dispProfit),0)+" DZD"+cntStr) : (sitTag+(dispProfit>=0?"+$":"-$")+DoubleToString(MathAbs(dispProfit),2)+cntStr);
    
    ObjectSetInteger(0, tName, OBJPROP_TIME, 0, time); ObjectSetDouble(0, tName, OBJPROP_PRICE, 0, candidateY);
    ObjectSetString(0, tName, OBJPROP_TEXT, text);
