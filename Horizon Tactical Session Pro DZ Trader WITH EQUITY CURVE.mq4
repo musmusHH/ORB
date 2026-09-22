@@ -1610,11 +1610,11 @@ void AuroraBuild()
    AuroraResBitmap("LogoCard","logo_card.bmp",10,8,265,86);
    AuroraRefCard("Status","EA STATUS","ACTIVE (GREEN)",10,AL_Y(102),265,A_H(55),C'104,244,157');
    AuroraRefCard("Srv","DATE / SERVER TIME",TimeToString(TimeCurrent(),TIME_DATE)+"  "+TimeToString(TimeCurrent(),TIME_SECONDS),10,AL_Y(164),265,A_H(55),C'190,201,213');
-   AuroraLabel("AccTitle","ACCOUNT INFO",20,AL_Y(236),20,clrWhite,"Arial");
+   AuroraLabel("AccTitle","ACCOUNT INFO",20,AL_Y(240),12,clrWhite,"Arial Bold");
    AuroraRefCard("Bal","BALANCE",FormatMoneyAbs(AccountBalance()),18,AL_Y(268),124,A_H(58),C'190,201,213'); AuroraRefCard("Eq","EQUITY",FormatMoneyAbs(AccountEquity()),151,AL_Y(268),124,A_H(58),C'190,201,213');
    AuroraRefCard("FM","FREE MARGIN",FormatMoneyAbs(AccountFreeMargin()),18,AL_Y(334),124,A_H(58),C'190,201,213'); AuroraRefCard("Lot","LOT SIZE",DoubleToString(CalculateLotSize(FixedSL_Points),2),151,AL_Y(334),124,A_H(58),C'190,201,213');
    AuroraRefCard("DD","DRAWDOWN",DoubleToString(AccountBalance()>0?cachedMaxDD/AccountBalance()*100.0:0,1)+"%",18,AL_Y(400),124,A_H(58),C'255,139,34'); AuroraRefCard("Lev","LEVERAGE","1:"+IntegerToString((int)AccountLeverage()),151,AL_Y(400),124,A_H(58),C'190,201,213');
-   AuroraLabel("StrTitle","STRATEGY INFO",20,AL_Y(482),20,clrWhite,"Arial"); AuroraRefCard("Strat","CURRENT STRATEGY",OrbTradeMode==MODE_NY_ONLY?"NEW YORK ORB":"LONDON ORB",18,AL_Y(515),257,A_H(52),C'58,220,221');
+   AuroraLabel("StrTitle","STRATEGY INFO",20,AL_Y(488),12,clrWhite,"Arial Bold"); AuroraRefCard("Strat","CURRENT STRATEGY",OrbTradeMode==MODE_NY_ONLY?"NEW YORK ORB":"LONDON ORB",18,AL_Y(515),257,A_H(52),C'58,220,221');
    AuroraRefCard("ORBH","ORB HIGH",DoubleToString(lonOrbHigh,2),18,AL_Y(575),124,A_H(58),C'190,201,213'); AuroraRefCard("ORBL","ORB LOW",DoubleToString(lonOrbLow,2),151,AL_Y(575),124,A_H(58),C'190,201,213'); AuroraRefCard("ORBR","ORB RANGE",DoubleToString(MathAbs(lonOrbHigh-lonOrbLow)/Point,0)+" pips",18,AL_Y(641),124,A_H(58),C'58,220,221');
    AuroraLabel("TradeRun","LONDON / NEW YORK ORB  //  RUNNING",18,aurora_h-23,9,C'58,220,221');
    // Right panel: ANCHORED TO THE RIGHT EDGE (CORNER_RIGHT_UPPER) so it always
@@ -1628,19 +1628,19 @@ void AuroraBuild()
    bool inL=false,inN=false; string cdL=HTP_SessionCountdownText(SESSION_ID_LONDON,inL), cdN=HTP_SessionCountdownText(SESSION_ID_NEWYORK,inN);
    AuroraLabelR("CdL",cdL,side-24,150,9,(inL?C'34,197,94':C'150,164,184'),"Arial Bold");
    AuroraLabelR("CdN",cdN,side-156,150,9,(inN?C'255,139,34':C'150,164,184'),"Arial Bold");
-   AuroraLabelR("PerfTitle","PERFORMANCE SUMMARY",side-16,AR_Y(184),15,clrWhite,"Arial");
+   AuroraLabelR("PerfTitle","PERFORMANCE SUMMARY",side-16,AR_Y(188),12,clrWhite,"Arial Bold");
    AuroraRefCardR("TTrades","TOTAL TRADES",IntegerToString(cachedWins+cachedLosses),side-18,AR_Y(211),80,A_H(58),clrWhite); AuroraRefCardR("Wins","WINS",IntegerToString(cachedWins),side-103,AR_Y(211),80,A_H(58),C'104,244,157'); AuroraRefCardR("Loss","LOSSES",IntegerToString(cachedLosses),side-188,AR_Y(211),80,A_H(58),C'255,96,120');
    AuroraRefCardR("Win","WINRATE",DoubleToString(cachedWinRate,1)+"%",side-18,AR_Y(277),124,A_H(58),C'104,244,157'); AuroraRefCardR("PF","PROFIT FACTOR",DoubleToString(cachedPF,2),side-151,AR_Y(277),117,A_H(58),C'104,244,157');
-   AuroraLabelR("PLTitle","P/L METRICS",side-16,AR_Y(359),15,clrWhite,"Arial"); AuroraRefCardR("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),side-18,AR_Y(392),124,A_H(58),C'104,244,157'); AuroraRefCardR("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),side-151,AR_Y(392),117,A_H(58),C'104,244,157');
+   AuroraLabelR("PLTitle","P/L METRICS",side-16,AR_Y(364),12,clrWhite,"Arial Bold"); AuroraRefCardR("DayPL","DAILY P/L",FormatMoney(GetPeriodProfit(0)),side-18,AR_Y(392),124,A_H(58),C'104,244,157'); AuroraRefCardR("ActivePL","ACTIVE P/L",FormatMoney(GetActiveProfit()),side-151,AR_Y(392),117,A_H(58),C'104,244,157');
    // Equity curve widget: LIVE curve drawn from actual closed-trade history (mockup style).
    g_htp_eqX=side-18; g_htp_eqY=AR_Y(480);   // distance from RIGHT edge to panel's LEFT side
    HTP_DrawLiveEquity("EqBox",g_htp_eqX,g_htp_eqY);
    AuroraLabelR("EqCurve","Equity curve",side-24,AR_Y(480)+6,8,C'160,178,198',"Arial");
-   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(579),15,clrWhite,"Arial"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
+   AuroraLabelR("NewsTitle","NEWS RADAR",side-16,AR_Y(584),12,clrWhite,"Arial Bold"); AuroraRectR("NewsBox",side-18,AR_Y(610),250,A_H(115),C'17,35,53',C'47,75,99'); AuroraLabelR("News1","●  News / session filter",side-28,AR_Y(628),9,C'255,96,120'); AuroraLabelR("News2","●  Spread protection active",side-28,AR_Y(652),9,C'255,139,34'); AuroraLabelR("News3","●  ORB execution monitor",side-28,AR_Y(676),9,C'174,116,255'); AuroraLabelR("News4",g_newsStatus,side-28,AR_Y(700),9,C'190,201,213');
    // Bottom center tracker modeled on the reference table.
-   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+16,12,clrWhite,"Arial Bold"); AuroraRefCard("Float","TOTAL FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-265,chartBottom+8,125,48,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-135,chartBottom+8,117,48,C'104,244,157');
+   AuroraLabel("LiveTitle","LIVE PROFIT TRACKER  //  LAST 5 DAYS",side+18,chartBottom+16,12,clrWhite,"Arial Bold"); AuroraRefCard("Float","FLOATING P/L",FormatMoney(GetActiveProfit()),side+mid-238,chartBottom+8,115,40,C'104,244,157'); AuroraRefCard("Gain","TODAY'S GAIN",DoubleToString(AccountBalance()>0?GetPeriodProfit(0)/AccountBalance()*100.0:0,2)+"%",side+mid-118,chartBottom+8,105,40,C'104,244,157');
    // 5-DAY PERFORMANCE TABLE built from real closed-trade history.
-   string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={62,52,76,64,86,80,68,58,50}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+44,8,C'190,201,213',"Arial"); xx+=widths[h]; }
+   string heads[9]={"DATE","LOTS","PROFIT","GAIN %","COMMISSION","NET P/L","WINRATE","DD %","PF"}; int widths[9]={48,44,62,56,70,64,58,48,40}; int xx=side+18; for(int h=0;h<9;h++){ AuroraLabel("Head"+IntegerToString(h),heads[h],xx,chartBottom+44,8,C'190,201,213',"Arial"); xx+=widths[h]; }
    int row=0;
    for(int dayOff=0; dayOff<10 && row<5; dayOff++)
    {
